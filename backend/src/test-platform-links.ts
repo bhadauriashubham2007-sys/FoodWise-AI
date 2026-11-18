@@ -206,11 +206,18 @@ async function testMatching() {
   console.log('\n--- TEST SUITE 3: Domain Security & Protocol Validation ---');
 
   assert(isValidPlatformUrl('https://www.zomato.com/order', 'zomato'), 'Valid https zomato.com accepted');
+  assert(isValidPlatformUrl('https://zomato.onelink.me/xqzv/38letfej', 'zomato'), 'Valid https zomato.onelink.me mobile share URL accepted');
+  assert(isValidPlatformUrl('https://zoma.to/r/12345', 'zomato'), 'Valid https zoma.to mobile short URL accepted');
+  assert(isValidPlatformUrl('https://link.zomato.com/share', 'zomato'), 'Valid https link.zomato.com accepted');
   assert(isValidPlatformUrl('https://swiggy.com/restaurants', 'swiggy'), 'Valid https swiggy.com accepted');
+  assert(isValidPlatformUrl('https://swiggy.onelink.me/dish', 'swiggy'), 'Valid https swiggy.onelink.me mobile share URL accepted');
+  assert(isValidPlatformUrl('https://swig.gy/r/123', 'swiggy'), 'Valid https swig.gy accepted');
   assert(isValidPlatformUrl('https://www.toingit.com/', 'toing'), 'Valid https toingit.com accepted');
   assert(!isValidPlatformUrl('https://evil-zomato.com/phish', 'zomato'), 'Malicious evil-zomato.com rejected');
+  assert(!isValidPlatformUrl('https://evil-zoma.to.attacker.com', 'zomato'), 'Malicious sub-host evil-zoma.to.attacker.com rejected');
   assert(!isValidPlatformUrl('javascript:alert(1)', 'swiggy'), 'javascript: URI protocol rejected');
   assert(!isValidPlatformUrl('file:///etc/passwd', 'toing'), 'file: protocol rejected');
+  assert(!isValidPlatformUrl('http://192.168.1.1/admin', 'zomato'), 'Internal private IP rejected');
 
   console.log('\n================================================================');
   console.log(`  Tests Completed: ${passedTests}/${totalTests} Passed (${Math.round((passedTests / totalTests) * 100)}%)`);

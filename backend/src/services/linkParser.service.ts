@@ -1,6 +1,14 @@
 import { URL } from 'node:url';
+import http from 'node:http';
+import https from 'node:https';
 import { PlatformType, LinkExtractionResult, CompareByLinkResponse, FoodItem } from '../types/index.js';
 import { ComparisonService, normalizeCityName, PriceOverrides } from './comparison.service.js';
+import {
+  extractCleanUrl,
+  detectPlatformFromUrl,
+  SHORT_REDIRECT_DOMAINS,
+  isAllowedHost,
+} from '../utils/urlValidator.js';
 
 const KNOWN_CITY_SLUGS: Record<string, string> = {
   bangalore: 'Bengaluru',
@@ -26,6 +34,155 @@ export class LinkParserService {
   }
 
   /**
+   * Checks for loopback, link-local, or private RFC1918 IPv4/IPv6 addresses to protect against SSRF.
+   */
+  private isPrivateOrLocalHost(host: string): boolean {
+    const h = host.toLowerCase().trim();
+    if (
+      h === 'localhost' ||
+      h.endsWith('.localhost') ||
+      h === '127.0.0.1' ||
+      h === '::1' ||
+      h === '0.0.0.0'
+    ) {
+      return true;
+    }
+
+    const ipv4Match = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4Match) {
+      const b0 = parseInt(ipv4Match[1], 10);
+      const b1 = parseInt(ipv4Match[2], 10);
+      if (b0 === 10) return true; // 10.0.0.0/8
+      if (b0 === 127) return true; // 127.0.0.0/8
+      if (b0 === 172 && b1 >= 16 && b1 <= 31) return true; // 172.16.0.0/12
+      if (b0 === 192 && b1 === 168) return true; // 192.168.0.0/16
+      if (b0 === 169 && b1 === 254) return true; // 169.254.0.0/16 link-local
+    }
+
+    return false;
+  }
+
+  /**
+   * Fetches redirect Location header for an authorized URL with strict timeout.
+   */
+  private async fetchRedirectLocation(targetUrl: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      try {
+        const u = new URL(targetUrl);
+        const transport = u.protocol === 'https:' ? https : http;
+
+        const req = transport.request(
+          u,
+          {
+            method: 'GET',
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            timeout: 2500,
+          },
+          (res) => {
+            const statusCode = res.statusCode || 0;
+            const loc = res.headers.location || null;
+            res.destroy(); // Abort reading body immediately
+            if (statusCode >= 300 && statusCode < 400 && loc) {
+              resolve(loc);
+            } else {
+              resolve(null);
+            }
+          }
+        );
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve(null);
+        });
+
+        req.on('error', () => {
+          resolve(null);
+        });
+
+        req.end();
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  /**
+   * Safely resolves HTTP redirects for mobile short links (e.g. zoma.to, link.zomato.com).
+   * Enforces:
+   * - Strict host allowlisting (redirect target MUST be an authorized platform host).
+   * - HTTPS/HTTP validation only.
+   * - SSRF protection: rejects loopback and private IP spaces.
+   * - Maximum 4 redirect hops.
+   * - 2500ms timeout per hop.
+   * - Fails open to the initial valid URL on network errors or timeouts without throwing.
+   */
+  public async resolveRedirectsSafely(initialUrl: string): Promise<string> {
+    let currentUrl = initialUrl;
+    let hops = 0;
+    const maxHops = 4;
+
+    while (hops < maxHops) {
+      let parsed: URL;
+      try {
+        parsed = new URL(currentUrl);
+      } catch {
+        return currentUrl;
+      }
+
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return currentUrl;
+      }
+
+      const host = parsed.hostname.toLowerCase();
+      const platform = detectPlatformFromUrl(currentUrl);
+      if (platform === 'unknown') {
+        return currentUrl;
+      }
+
+      if (this.isPrivateOrLocalHost(host)) {
+        return currentUrl;
+      }
+
+      const isShort = SHORT_REDIRECT_DOMAINS.some((d) => host === d || host.endsWith('.' + d));
+      if (!isShort && hops > 0) {
+        return currentUrl;
+      }
+
+      try {
+        const nextUrl = await this.fetchRedirectLocation(currentUrl);
+        if (!nextUrl || nextUrl === currentUrl) {
+          return currentUrl;
+        }
+
+        const nextParsed = new URL(nextUrl, currentUrl);
+        if (nextParsed.protocol !== 'http:' && nextParsed.protocol !== 'https:') {
+          return currentUrl;
+        }
+
+        const nextHost = nextParsed.hostname.toLowerCase();
+        if (this.isPrivateOrLocalHost(nextHost)) {
+          return currentUrl;
+        }
+
+        if (detectPlatformFromUrl(nextParsed.href) === 'unknown') {
+          return currentUrl;
+        }
+
+        currentUrl = nextParsed.href;
+        hops++;
+      } catch {
+        return currentUrl;
+      }
+    }
+
+    return currentUrl;
+  }
+
+  /**
    * Validate and parse a food link from Zomato, Swiggy, or Toing.
    * Strictly respects:
    * 1. User's active city: prevents Bengaluru items from masquerading as other cities.
@@ -38,9 +195,10 @@ export class LinkParserService {
     manualPriceRupees?: number,
     city?: string
   ): Promise<CompareByLinkResponse> {
-    const cleanUrl = rawUrl.trim();
+    // 1. Sanitize & extract URL from potential mobile share text or trailing punctuation
+    const cleanUrl = extractCleanUrl(rawUrl);
 
-    // 1. URL Structure Validation
+    // 2. URL Structure Validation
     let parsedUrl: URL;
     try {
       parsedUrl = new URL(cleanUrl);
@@ -48,7 +206,7 @@ export class LinkParserService {
       return {
         success: false,
         extraction: {
-          url: cleanUrl,
+          url: rawUrl.trim(),
           sourcePlatform: 'unknown',
           isValidDomain: false,
           isAccessible: false,
@@ -79,23 +237,11 @@ export class LinkParserService {
       };
     }
 
-    const hostname = parsedUrl.hostname.toLowerCase();
+    const initialHost = parsedUrl.hostname.toLowerCase();
 
-    // 2. Identify Source Platform Domain
-    let sourcePlatform: PlatformType | 'unknown' = 'unknown';
-    if (hostname === 'zomato.com' || hostname.endsWith('.zomato.com')) {
-      sourcePlatform = 'zomato';
-    } else if (hostname === 'swiggy.com' || hostname.endsWith('.swiggy.com')) {
-      sourcePlatform = 'swiggy';
-    } else if (
-      hostname === 'toingit.com' ||
-      hostname.endsWith('.toingit.com') ||
-      hostname === 'toing.in' ||
-      hostname.endsWith('.toing.in') ||
-      hostname === 'toing.com'
-    ) {
-      sourcePlatform = 'toing';
-    } else {
+    // 3. Identify Source Platform Domain (using comprehensive platform allowlist including mobile short domains)
+    const initialPlatform = detectPlatformFromUrl(cleanUrl);
+    if (initialPlatform === 'unknown') {
       return {
         success: false,
         extraction: {
@@ -105,17 +251,28 @@ export class LinkParserService {
           isAccessible: false,
           confidence: 'fallback_required',
           dataSource: 'url_parsed',
-          extractionNotes: `Domain ${hostname} is not supported. Supported platforms: Zomato, Swiggy, Toing.`,
+          extractionNotes: `Domain "${initialHost}" is not recognized as a supported food delivery platform (Zomato, Swiggy, or Toing).`,
         },
         equivalentItems: [],
-        message: 'Unsupported platform domain. Please enter a link from Zomato, Swiggy, or Toing.',
+        message: `The domain "${initialHost}" is not supported. FoodWise compares prices across Zomato, Swiggy, and Toing. Please paste a link from one of these platforms.`,
       };
     }
 
-    // 3. Extract Details from URL including potential restaurant city
+    // 4. Safely follow redirects for mobile short links (e.g. zoma.to/r/..., link.zomato.com)
+    let finalUrlStr = cleanUrl;
+    try {
+      finalUrlStr = await this.resolveRedirectsSafely(cleanUrl);
+      parsedUrl = new URL(finalUrlStr);
+    } catch {
+      // In case of any network timeout, continue with cleanUrl
+    }
+
+    const sourcePlatform = detectPlatformFromUrl(finalUrlStr) as PlatformType;
+
+    // 5. Extract Details from URL including potential restaurant city
     const extracted = this.extractDetailsFromUrl(parsedUrl, sourcePlatform);
 
-    // 4. Validate Location Alignment: Check if link restaurant's city conflicts with active city
+    // 6. Validate Location Alignment: Check if link restaurant's city conflicts with active city
     if (extracted.city && city && city.trim() !== '') {
       const urlCityNorm = normalizeCityName(extracted.city);
       const activeCityNorm = normalizeCityName(city);
@@ -155,7 +312,7 @@ export class LinkParserService {
           }
         : undefined;
 
-    // 5. Handle Manual Fallback vs Automatic URL Extraction
+    // 7. Handle Manual Fallback vs Automatic URL Extraction
     if (manualFoodName && manualFoodName.trim() !== '') {
       const foodName = manualFoodName.trim();
       const searchMatches = this.comparisonService.searchFood({ query: foodName, city });
@@ -223,7 +380,7 @@ export class LinkParserService {
       };
     }
 
-    // 6. Automatic Extraction from Permitted URL Metadata & Slugs
+    // 8. Automatic Extraction from Permitted URL Metadata & Slugs
     if (!extracted.foodName) {
       // Prompt user for manual input fallback (Never pretend inaccessible data was retrieved)
       const extraction: LinkExtractionResult = {
@@ -234,7 +391,7 @@ export class LinkParserService {
         confidence: 'fallback_required',
         dataSource: 'url_parsed',
         extractionNotes:
-          'Verified platform URL, but specific dish name could not be automatically determined from the link structure.',
+          `Verified ${sourcePlatform.toUpperCase()} platform link, but specific dish name could not be automatically determined from the link structure.`,
       };
 
       return {
@@ -423,8 +580,10 @@ export class LinkParserService {
     // Check query parameters for dish
     const queryDish =
       params.get('dish') ||
+      params.get('dish_name') ||
       params.get('item') ||
       params.get('item_name') ||
+      params.get('name') ||
       params.get('q') ||
       params.get('query') ||
       params.get('search');
@@ -463,6 +622,7 @@ export class LinkParserService {
       'biryani',
       'pizza',
       'burger',
+      'whopper',
       'momo',
       'momos',
       'coffee',
@@ -478,6 +638,21 @@ export class LinkParserService {
       'dessert',
       'roll',
       'fries',
+      'tikka',
+      'makhani',
+      'ice-cream',
+      'icecream',
+      'sundae',
+      'cake',
+      'shake',
+      'wrap',
+      'curry',
+      'dal',
+      'paratha',
+      'chole',
+      'bhature',
+      'pav',
+      'bhaji',
     ];
 
     let foundFood: string | undefined;

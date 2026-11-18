@@ -6,6 +6,7 @@ import { fetchFoods, fetchComparison } from '../services/api';
 import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
 import { useUserLocation } from '../context/LocationContext';
+import { PlatformOrderButton } from '../components/PlatformOrderButton';
 
 interface ComparisonProps {
   savedItems: FoodItem[];
@@ -296,13 +297,15 @@ export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave
               </p>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-col items-end gap-1.5 min-w-[200px]">
             {comparison.cheapestQuote.isAvailable ? (
-              <a
-                href={comparison.cheapestQuote.directOrderUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() =>
+              <PlatformOrderButton
+                platform={comparison.cheapestQuote.platform}
+                platformDisplayName={comparison.cheapestQuote.platformDisplayName}
+                directOrderUrl={comparison.cheapestQuote.directOrderUrl}
+                isCheapest={true}
+                size="lg"
+                onRedirect={() =>
                   logPlatformRedirect({
                     dishName: selectedItem?.name || comparison.foodItem.name,
                     platform: comparison.cheapestQuote.platform,
@@ -313,17 +316,7 @@ export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave
                     linkType: comparison.cheapestQuote.linkType,
                   })
                 }
-                className={`px-5 py-3 rounded-xl text-white text-xs font-bold flex items-center gap-2 shadow-sm transition-all whitespace-nowrap ${
-                  comparison.isPriceTie
-                    ? 'bg-blue-600 hover:bg-blue-700'
-                    : !comparison.isDefinitiveCheapest
-                    ? 'bg-amber-600 hover:bg-amber-700'
-                    : 'bg-emerald-600 hover:bg-emerald-700'
-                }`}
-              >
-                <span>Proceed on {comparison.cheapestQuote.platformDisplayName}</span>
-                <ExternalLink className="w-4 h-4" />
-              </a>
+              />
             ) : (
               <div className="px-5 py-3 rounded-xl bg-stone-200 text-stone-600 text-xs font-bold flex items-center gap-2 cursor-not-allowed whitespace-nowrap">
                 <span>Unavailable in {activeCity}</span>
@@ -547,11 +540,13 @@ export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave
                     </span>
                   </div>
 
-                  <a
-                    href={quote.directOrderUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() =>
+                  <PlatformOrderButton
+                    platform={quote.platform}
+                    platformDisplayName={quote.platformDisplayName}
+                    directOrderUrl={quote.directOrderUrl}
+                    isCheapest={isCheapest}
+                    size="lg"
+                    onRedirect={() =>
                       logPlatformRedirect({
                         dishName: selectedItem?.name || quote.itemName,
                         platform: quote.platform,
@@ -562,15 +557,7 @@ export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave
                         linkType: quote.linkType,
                       })
                     }
-                    className={`w-full py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
-                      isCheapest
-                        ? 'bg-[#FF5E1E] hover:bg-[#E54E12] text-white shadow-md shadow-orange-500/20'
-                        : 'bg-stone-900 hover:bg-stone-800 text-white'
-                    }`}
-                  >
-                    <span>{quote.platform === 'toing' ? 'Open Toing (Official Website)' : `Order Manually on ${quote.platformDisplayName}`}</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                  />
 
                   {/* Destination Link Classification Badge */}
                   <div className="mt-2 text-center">

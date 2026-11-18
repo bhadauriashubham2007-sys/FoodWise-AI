@@ -18,6 +18,7 @@ import { compareByLink } from '../services/api';
 import { useUserLocation } from '../context/LocationContext';
 import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
+import { PlatformOrderButton } from './PlatformOrderButton';
 
 interface CompareByLinkProps {
   onOpenQuickModal?: (item: FoodItem) => void;
@@ -160,8 +161,8 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
             <div className="flex items-center flex-1 pl-2">
               <Link2 className="w-5 h-5 text-stone-400 mr-2 flex-shrink-0" />
               <input
-                type="url"
-                placeholder="Paste a Zomato, Swiggy or Toing food link..."
+                type="text"
+                placeholder="Paste a Zomato, Swiggy or Toing food link or mobile share text..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 className="w-full bg-transparent text-sm text-stone-900 placeholder-stone-400 focus:outline-none font-medium py-1.5"
@@ -445,11 +446,12 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
                         </span>
                       </div>
 
-                      <a
-                        href={quote.directOrderUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() =>
+                      <PlatformOrderButton
+                        platform={quote.platform}
+                        platformDisplayName={quote.platformDisplayName}
+                        directOrderUrl={quote.directOrderUrl}
+                        isCheapest={isCheapest}
+                        onRedirect={() =>
                           logPlatformRedirect({
                             dishName:
                               result?.matchedFoodItem?.name ||
@@ -466,15 +468,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
                             linkType: quote.linkType,
                           })
                         }
-                        className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
-                          isCheapest
-                            ? 'bg-[#FF5E1E] hover:bg-[#E54E12] text-white shadow-sm'
-                            : 'bg-stone-900 hover:bg-stone-800 text-white'
-                        }`}
-                      >
-                        <span>{quote.platform === 'toing' ? 'Open Toing (Official Site)' : `Order on ${quote.platformDisplayName}`}</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                      />
 
                       <div className="mt-1.5 text-center">
                         <span className="inline-block text-[9px] px-2 py-0.5 rounded-full bg-stone-200/70 text-stone-700 font-semibold">

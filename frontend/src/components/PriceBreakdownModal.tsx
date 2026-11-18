@@ -3,6 +3,7 @@ import { X, ExternalLink, AlertCircle, Info } from 'lucide-react';
 import { FoodItem, PlatformPriceQuote } from '../types';
 import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
+import { PlatformOrderButton } from './PlatformOrderButton';
 
 interface PriceBreakdownModalProps {
   item: FoodItem | null;
@@ -171,11 +172,12 @@ export const PriceBreakdownModal: React.FC<PriceBreakdownModalProps> = ({ item, 
                       </span>
                     </div>
 
-                    <a
-                      href={quote.directOrderUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={() =>
+                    <PlatformOrderButton
+                      platform={quote.platform}
+                      platformDisplayName={quote.platformDisplayName}
+                      directOrderUrl={quote.directOrderUrl}
+                      isCheapest={isCheapest}
+                      onRedirect={() =>
                         logPlatformRedirect({
                           dishName: item.name,
                           platform: quote.platform,
@@ -186,15 +188,7 @@ export const PriceBreakdownModal: React.FC<PriceBreakdownModalProps> = ({ item, 
                           linkType: quote.linkType,
                         })
                       }
-                      className={`w-full py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors ${
-                        isCheapest
-                          ? 'bg-[#FF5E1E] hover:bg-[#E54E12] text-white shadow-sm'
-                          : 'bg-stone-900 hover:bg-stone-800 text-white'
-                      }`}
-                    >
-                      <span>{quote.platform === 'toing' ? 'Open Toing (Official Site)' : `Order on ${quote.platformDisplayName}`}</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                    />
 
                     <div className="mt-1.5 text-center">
                       <span className="inline-block text-[9px] px-2 py-0.5 rounded-full bg-stone-200/70 text-stone-700 font-semibold">

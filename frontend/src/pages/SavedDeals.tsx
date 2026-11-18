@@ -15,6 +15,7 @@ import { FoodItem } from '../types';
 import { formatPaise } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
 import { useAuth } from '../context/AuthContext';
+import { handleOpenPlatformLink } from '../utils/deepLink';
 
 interface SavedDealsProps {
   savedItems: FoodItem[];
@@ -247,26 +248,30 @@ export const SavedDeals: React.FC<SavedDealsProps> = ({
                   >
                     View Comparison
                   </Link>
-                  <a
-                    href={cheapest.directOrderUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     onClick={() =>
-                      logPlatformRedirect({
-                        dishName: item.name,
-                        platform: cheapest.platform,
-                        restaurantId: item.restaurantId,
-                        restaurantName: item.restaurantName,
-                        itemId: item.id,
-                        destinationUrl: cheapest.directOrderUrl,
-                        linkType: cheapest.linkType,
-                      })
+                      handleOpenPlatformLink(
+                        cheapest.directOrderUrl,
+                        cheapest.platform,
+                        'app',
+                        () =>
+                          logPlatformRedirect({
+                            dishName: item.name,
+                            platform: cheapest.platform,
+                            restaurantId: item.restaurantId,
+                            restaurantName: item.restaurantName,
+                            itemId: item.id,
+                            destinationUrl: cheapest.directOrderUrl,
+                            linkType: cheapest.linkType,
+                          })
+                      )
                     }
                     className="p-2.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 transition-colors"
                     title={`Open ${cheapest.platformDisplayName} (${cheapest.linkTypeLabel || 'Direct Link'})`}
                   >
                     <ExternalLink className="w-4 h-4" />
-                  </a>
+                  </button>
                 </div>
               </div>
             );
