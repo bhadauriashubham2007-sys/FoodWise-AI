@@ -1,3 +1,4 @@
+import { URL } from 'node:url';
 import { PlatformType, LinkType } from '../types/index.js';
 
 /**

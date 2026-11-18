@@ -1,3 +1,4 @@
+import { URL } from 'node:url';
 import { PlatformType, LinkExtractionResult, CompareByLinkResponse, FoodItem } from '../types/index.js';
 import { ComparisonService, normalizeCityName, PriceOverrides } from './comparison.service.js';
 

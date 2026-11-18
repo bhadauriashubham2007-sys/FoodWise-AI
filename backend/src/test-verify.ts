@@ -31,13 +31,17 @@ console.log(`Toing Platform Fee (Confirmed Zero): ${toing.calculateQuote('Cheape
 const service = new ComparisonService();
 const results = service.searchFood();
 console.log(`\nCatalog Items Count: ${results.length}`);
-console.log(`Top Item: ${results[0].name} from ${results[0].restaurantName}`);
-console.log(`Cheapest Platform: ${results[0].cheapestPlatform} (Savings: ₹${(results[0].maxSavingsPaise || 0) / 100})`);
+
+const topItem = results[0];
+if (topItem) {
+  console.log(`Top Item: ${topItem.name} from ${topItem.restaurantName}`);
+  console.log(`Cheapest Platform: ${topItem.cheapestPlatform ?? 'N/A'} (Savings: ₹${(topItem.maxSavingsPaise || 0) / 100})`);
+}
 
 const biryaniCompare = service.getComparison('biryani-hyd-1');
-if (biryaniCompare) {
+if (biryaniCompare && biryaniCompare.foodItem) {
   console.log(`\nDetailed Comparison for: ${biryaniCompare.foodItem.name}`);
   console.log(`Recommendation: ${biryaniCompare.recommendationReason}`);
 }
 
-console.log('\n✅ ALL ARCHITECTURAL TESTS PASSED!');
+console.log('\n✅ ALL ARCHITECTURAL TESTS PASSED!\n');
