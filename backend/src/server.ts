@@ -78,12 +78,14 @@ app.use((_req, res) => {
 // Global Express Error-Handling Middleware (Must be registered last)
 app.use(globalErrorHandler);
 
+const HOST = '0.0.0.0';
+
 // Start Server
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log(`===============================================`);
   console.log(`  🍲 FoodWise AI Backend Server Running!      `);
-  console.log(`  🚀 Port: http://localhost:${PORT}             `);
-  console.log(`  📋 Health: http://localhost:${PORT}/api/health`);
-  console.log(`  🗄️ Database: http://localhost:${PORT}/api/database/health`);
+  console.log(`  🚀 Host: ${HOST} | Port: ${PORT}            `);
+  console.log(`  📋 Health: http://${HOST}:${PORT}/api/health`);
+  console.log(`  🗄️ Database: http://${HOST}:${PORT}/api/database/health`);
   console.log(`===============================================`);
 });
