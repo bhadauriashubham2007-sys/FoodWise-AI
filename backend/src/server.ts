@@ -1,5 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 import foodRoutes from './routes/food.routes.js';
 import couponRoutes from './routes/coupons.routes.js';
 import aiRoutes from './routes/ai.routes.js';
@@ -54,6 +56,19 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/compare-link', linkRoutes);
 app.use('/api/brands', brandRoutes);
 app.use('/api/database', databaseRoutes);
+
+// Serve frontend static build if available (production full-stack deployment)
+const frontendDist = path.resolve(process.cwd(), 'frontend/dist');
+
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 // 404 Handler for undefined API endpoints
 app.use((_req, res) => {
