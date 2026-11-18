@@ -1,0 +1,23 @@
+{
+  "name": "foodwise-ai-monorepo",
+  "version": "1.0.0",
+  "description": "FoodWise AI - Multi-Platform Food Delivery Price Comparison Engine (Zomato, Swiggy, Toing)",
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "test": "npm --prefix backend run test",
+    "test:search": "npm --prefix backend run test:search",
+    "test:link": "npm --prefix backend run test:link",
+    "test:toing": "npm --prefix backend run test:toing",
+    "test:links": "npm --prefix backend run test:links",
+    "test:brand": "npm --prefix backend run test:brand",
+    "test:scenarios": "npm --prefix backend run test:scenarios",
+    "start": "npm --prefix backend start"
+  },
+  "keywords": ["food-tech", "price-comparison", "zomato", "swiggy", "toing", "gemini-ai", "react", "express"],
+  "author": "FoodWise Team",
+  "license": "MIT"
+}
