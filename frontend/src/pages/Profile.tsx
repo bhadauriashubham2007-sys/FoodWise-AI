@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUserLocation } from '../context/LocationContext';
-import { getUserProfile, updateUserProfile } from '../services/api';
 
 const DEFAULT_PREFERENCES = {
   name: 'Foodie Friend',
@@ -25,7 +24,7 @@ const DEFAULT_PREFERENCES = {
 };
 
 export const Profile: React.FC = () => {
-  const { user, token, openAuthModal, isConfigured } = useAuth();
+  const { user, profile, token, openAuthModal, isConfigured, updateProfile, loading } = useAuth();
   const { activeCity, setActiveCity } = useUserLocation();
 
   const [name, setName] = useState(DEFAULT_PREFERENCES.name);
@@ -37,84 +36,46 @@ export const Profile: React.FC = () => {
   );
   const [city, setCity] = useState(activeCity || DEFAULT_PREFERENCES.city);
   const [pincode, setPincode] = useState(DEFAULT_PREFERENCES.pincode);
-  const [loadingProfile, setLoadingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Sync internal city state when activeCity updates from navbar or context
+  // Synchronize state from authoritative cloud profile, auth user metadata, or active city
   useEffect(() => {
-    if (activeCity) {
-      setCity(activeCity);
-    }
-  }, [activeCity]);
+    if (user) {
+      const authoritativeName =
+        profile?.fullName ||
+        user.user_metadata?.full_name ||
+        user.email?.split('@')[0] ||
+        DEFAULT_PREFERENCES.name;
 
-  // Load preferences on mount or when auth state transitions (login, logout, account switch)
-  useEffect(() => {
-    let active = true;
+      const authoritativeCity =
+        profile?.defaultCity ||
+        activeCity ||
+        localStorage.getItem('foodwise_active_city') ||
+        DEFAULT_PREFERENCES.city;
 
-    function applyCleanDefaults() {
-      setName(DEFAULT_PREFERENCES.name);
-      setDietaryPreference(DEFAULT_PREFERENCES.dietaryPreference);
-      setPreferredPlatform(DEFAULT_PREFERENCES.preferredPlatform);
-      setCity(DEFAULT_PREFERENCES.city);
-      setPincode(DEFAULT_PREFERENCES.pincode);
-      setSavedSuccess(null);
-      setErrorMessage(null);
-    }
-
-    async function loadData() {
-      // 1. Immediately reset stale fields to prevent cross-account profile leakage
-      applyCleanDefaults();
-
-      if (user && token) {
-        setLoadingProfile(true);
-        try {
-          const profile = await getUserProfile(user.id, token);
-          if (active) {
-            if (profile) {
-              setName(profile.fullName || user.user_metadata?.full_name || DEFAULT_PREFERENCES.name);
-              setDietaryPreference(profile.dietaryPreference || DEFAULT_PREFERENCES.dietaryPreference);
-              setPreferredPlatform(profile.preferredPlatform || DEFAULT_PREFERENCES.preferredPlatform);
-              setCity(profile.defaultCity || DEFAULT_PREFERENCES.city);
-              setPincode(profile.defaultPincode || DEFAULT_PREFERENCES.pincode);
-            } else if (user.user_metadata?.full_name) {
-              setName(user.user_metadata.full_name);
-            } else if (user.email) {
-              setName(user.email.split('@')[0]);
-            }
-          }
-        } catch (err: any) {
-          console.warn('[Profile] Could not fetch cloud profile, retaining clean defaults:', err.message);
-        } finally {
-          if (active) setLoadingProfile(false);
-        }
-      } else {
-        // 2. User logged out / Guest mode: restore explicitly saved guest profile if available
-        try {
-          const stored = localStorage.getItem('foodwise_guest_profile');
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (active && parsed && typeof parsed === 'object') {
-              setName(parsed.name || DEFAULT_PREFERENCES.name);
-              setDietaryPreference(parsed.dietaryPreference || DEFAULT_PREFERENCES.dietaryPreference);
-              setPreferredPlatform(parsed.preferredPlatform || DEFAULT_PREFERENCES.preferredPlatform);
-              setCity(parsed.city || DEFAULT_PREFERENCES.city);
-              setPincode(parsed.pincode || DEFAULT_PREFERENCES.pincode);
-            }
-          }
-        } catch {
-          // Defaults already cleanly applied
-        }
+      setName(authoritativeName);
+      setCity(authoritativeCity);
+      setDietaryPreference(profile?.dietaryPreference || DEFAULT_PREFERENCES.dietaryPreference);
+      setPreferredPlatform(profile?.preferredPlatform || DEFAULT_PREFERENCES.preferredPlatform);
+      setPincode(profile?.defaultPincode || DEFAULT_PREFERENCES.pincode);
+    } else {
+      // Guest Mode: load from localStorage
+      try {
+        const stored = localStorage.getItem('foodwise_guest_profile');
+        const parsed = stored ? JSON.parse(stored) : null;
+        setName(parsed?.name || DEFAULT_PREFERENCES.name);
+        setCity(parsed?.city || activeCity || DEFAULT_PREFERENCES.city);
+        setDietaryPreference(parsed?.dietaryPreference || DEFAULT_PREFERENCES.dietaryPreference);
+        setPreferredPlatform(parsed?.preferredPlatform || DEFAULT_PREFERENCES.preferredPlatform);
+        setPincode(parsed?.pincode || DEFAULT_PREFERENCES.pincode);
+      } catch {
+        setName(DEFAULT_PREFERENCES.name);
+        setCity(activeCity || DEFAULT_PREFERENCES.city);
       }
     }
-
-    loadData();
-
-    return () => {
-      active = false;
-    };
-  }, [user?.id, token]);
+  }, [user?.id, profile, activeCity]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,33 +84,40 @@ export const Profile: React.FC = () => {
     setIsSaving(true);
 
     try {
+      const trimmedName = name.trim();
+      const trimmedCity = city.trim() || activeCity;
+      const trimmedPincode = pincode.trim();
+
       // 1. Immediately update shared location state across all pages
-      await setActiveCity(city);
+      await setActiveCity(trimmedCity);
 
       if (user && token) {
         // Authenticated: Persist to backend Supabase database
-        await updateUserProfile(
-          user.id,
-          {
-            fullName: name,
-            dietaryPreference,
-            preferredPlatform,
-            defaultCity: city,
-            defaultPincode: pincode.trim() || undefined,
-          },
-          token
-        );
+        const updated = await updateProfile({
+          fullName: trimmedName || undefined,
+          dietaryPreference,
+          preferredPlatform,
+          defaultCity: trimmedCity,
+          defaultPincode: trimmedPincode || undefined,
+        });
+
+        // 2. Verify persisted values returned from database response
+        if (updated.fullName) setName(updated.fullName);
+        if (updated.defaultCity) setCity(updated.defaultCity);
+        if (updated.dietaryPreference) setDietaryPreference(updated.dietaryPreference);
+        if (updated.preferredPlatform) setPreferredPlatform(updated.preferredPlatform);
+
         setSavedSuccess('Preferences successfully synced to your cloud account!');
       } else {
         // Guest: Persist to localStorage only
         localStorage.setItem(
           'foodwise_guest_profile',
           JSON.stringify({
-            name,
+            name: trimmedName || DEFAULT_PREFERENCES.name,
             dietaryPreference,
             preferredPlatform,
-            city,
-            pincode,
+            city: trimmedCity,
+            pincode: trimmedPincode,
           })
         );
         setSavedSuccess('Preferences saved locally in your browser (Guest Mode).');
@@ -157,7 +125,9 @@ export const Profile: React.FC = () => {
 
       setTimeout(() => setSavedSuccess(null), 4000);
     } catch (err: any) {
+      console.error('[Profile] Save failed:', err);
       setErrorMessage(err.message || 'Failed to save profile preferences.');
+      setSavedSuccess(null);
     } finally {
       setIsSaving(false);
     }
@@ -271,7 +241,7 @@ export const Profile: React.FC = () => {
                 <Settings className="w-5 h-5 text-[#FF5E1E]" />
                 <span>Delivery &amp; Comparison Preferences</span>
               </h3>
-              {loadingProfile && (
+              {loading && (
                 <div className="text-xs text-stone-500 animate-pulse">Loading profile...</div>
               )}
             </div>

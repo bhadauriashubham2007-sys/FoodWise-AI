@@ -26,7 +26,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ savedCount }) => {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, signOut, openAuthModal } = useAuth();
+  const { user, profile, signOut, openAuthModal } = useAuth();
   const { activeCity, setActiveCity } = useUserLocation();
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
   const [customCityInput, setCustomCityInput] = useState('');
@@ -79,6 +79,7 @@ export const Navbar: React.FC<NavbarProps> = ({ savedCount }) => {
   };
 
   const displayName =
+    profile?.fullName ||
     user?.user_metadata?.full_name ||
     user?.email?.split('@')[0] ||
     'Guest';

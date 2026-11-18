@@ -32,9 +32,22 @@ function getInitialCity(): string {
 }
 
 export const LocationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, token } = useAuth();
+  const { user, token, profile } = useAuth();
   const [activeCity, setActiveCityState] = useState<string>(getInitialCity);
   const [isLoadingLocation, setIsLoadingLocation] = useState<boolean>(false);
+
+  // Synchronize cloud profile default city when authoritative profile is loaded
+  useEffect(() => {
+    if (profile?.defaultCity && profile.defaultCity.trim()) {
+      const cloudCity = profile.defaultCity.trim();
+      setActiveCityState(cloudCity);
+      try {
+        localStorage.setItem('foodwise_active_city', cloudCity);
+      } catch {
+        // ignore storage error
+      }
+    }
+  }, [profile?.defaultCity]);
 
   // Timestamp tracking to prevent stale asynchronous profile fetches from overwriting a user-selected city
   const userSelectedAtRef = useRef<number>(0);

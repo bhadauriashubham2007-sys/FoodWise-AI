@@ -712,7 +712,51 @@ export class DatabaseService {
         console.warn('[DatabaseService] Error fetching user profile:', error.message);
         return null;
       }
-      return data;
+
+      if (data) {
+        return data;
+      }
+
+      // If profile row doesn't exist yet, lazily create it from auth metadata
+      try {
+        if (typeof userClient.auth?.getUser === 'function') {
+          const { data: authData } = await userClient.auth.getUser();
+          const user = authData?.user;
+          if (user && user.id === userId) {
+            const fallbackName =
+              user.user_metadata?.full_name ||
+              user.user_metadata?.name ||
+              user.email?.split('@')[0] ||
+              'Foodie Friend';
+
+            const { data: createdProfile, error: insertError } = await userClient
+              .from('profiles')
+              .upsert(
+                {
+                  id: userId,
+                  email: user.email,
+                  full_name: fallbackName,
+                  avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || null,
+                  dietary_preference: 'all',
+                  preferred_platform: 'all',
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: 'id' }
+              )
+              .select()
+              .single();
+
+            if (!insertError && createdProfile) {
+              return createdProfile;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn('[DatabaseService] Lazy profile provisioning failed:', err.message);
+      }
+
+      return null;
     } catch (err: any) {
       console.warn('[DatabaseService] Error in getUserProfile:', err.message);
       return null;
@@ -720,7 +764,8 @@ export class DatabaseService {
   }
 
   /**
-   * Updates user delivery preferences.
+   * Updates user delivery preferences using atomic upsert.
+   * Ensures missing profile rows are created instead of throwing 0-row update errors.
    * Requires a valid user-scoped Supabase client. Fails closed if missing.
    * Never falls back to anonymous or admin clients.
    */
@@ -743,16 +788,20 @@ export class DatabaseService {
     }
 
     try {
+      const payload: Record<string, any> = {
+        id: userId,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (updates.fullName !== undefined) payload.full_name = updates.fullName;
+      if (updates.dietaryPreference !== undefined) payload.dietary_preference = updates.dietaryPreference;
+      if (updates.preferredPlatform !== undefined) payload.preferred_platform = updates.preferredPlatform;
+      if (updates.defaultCity !== undefined) payload.default_city = updates.defaultCity;
+      if (updates.defaultPincode !== undefined) payload.default_pincode = updates.defaultPincode;
+
       const { data, error } = await userClient
         .from('profiles')
-        .update({
-          full_name: updates.fullName,
-          dietary_preference: updates.dietaryPreference,
-          preferred_platform: updates.preferredPlatform,
-          default_city: updates.defaultCity,
-          default_pincode: updates.defaultPincode,
-        })
-        .eq('id', userId)
+        .upsert(payload, { onConflict: 'id' })
         .select()
         .single();
 

@@ -1,11 +1,14 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../config/supabase';
+import { UserProfile, ProfileUpdateInput } from '../types';
+import { getUserProfile, updateUserProfile } from '../services/api';
 
 export type AuthMode = 'signin' | 'signup';
 
 interface AuthContextValue {
   user: User | null;
+  profile: UserProfile | null;
   session: Session | null;
   token: string | null;
   loading: boolean;
@@ -17,6 +20,8 @@ interface AuthContextValue {
     fullName?: string
   ) => Promise<{ error: AuthError | Error | null; user: User | null }>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
+  updateProfile: (updates: ProfileUpdateInput) => Promise<UserProfile>;
   authModalOpen: boolean;
   authModalMode: AuthMode;
   openAuthModal: (mode?: AuthMode) => void;
@@ -27,10 +32,27 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<AuthMode>('signin');
+
+  const fetchProfileForUser = useCallback(
+    async (userId: string, accessToken: string): Promise<UserProfile | null> => {
+      try {
+        const p = await getUserProfile(userId, accessToken);
+        if (p) {
+          setProfile(p);
+          return p;
+        }
+      } catch (err: any) {
+        console.warn('[AuthContext] Failed fetching cloud profile:', err?.message || err);
+      }
+      return null;
+    },
+    []
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -47,6 +69,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (!error && data.session) {
             setSession(data.session);
             setUser(data.session.user);
+            if (data.session.user && data.session.access_token) {
+              await fetchProfileForUser(data.session.user.id, data.session.access_token);
+            }
           }
           setLoading(false);
         }
@@ -65,10 +90,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, currentSession) => {
+      async (_event, currentSession) => {
         if (!mounted) return;
         setSession(currentSession);
         setUser(currentSession?.user ?? null);
+        if (currentSession?.user && currentSession.access_token) {
+          await fetchProfileForUser(currentSession.user.id, currentSession.access_token);
+        } else {
+          setProfile(null);
+        }
         setLoading(false);
       }
     );
@@ -77,7 +107,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       mounted = false;
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchProfileForUser]);
+
+  const refreshProfile = async (): Promise<UserProfile | null> => {
+    if (!user || !session?.access_token) return null;
+    return fetchProfileForUser(user.id, session.access_token);
+  };
+
+  const updateProfile = async (updates: ProfileUpdateInput): Promise<UserProfile> => {
+    if (!user || !session?.access_token) {
+      throw new Error('You must be signed in to update your profile.');
+    }
+
+    // 1. Persist to cloud database via API
+    const updated = await updateUserProfile(user.id, updates, session.access_token);
+
+    // 2. Synchronize full_name in Supabase auth user_metadata if changed
+    if (updates.fullName !== undefined && isSupabaseConfigured) {
+      try {
+        const { data: authUser, error: authErr } = await supabase.auth.updateUser({
+          data: { full_name: updates.fullName },
+        });
+        if (!authErr && authUser?.user) {
+          setUser(authUser.user);
+        }
+      } catch (err) {
+        console.warn('[AuthContext] Auth user metadata sync warning:', err);
+      }
+    }
+
+    // 3. Immediately set the updated authoritative profile
+    setProfile(updated);
+    return updated;
+  };
 
   const signIn = async (
     email: string,
@@ -103,6 +165,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setSession(data.session);
       setUser(data.user);
+      if (data.user && data.session?.access_token) {
+        await fetchProfileForUser(data.user.id, data.session.access_token);
+      }
       return { error: null };
     } catch (err: any) {
       return { error: err };
@@ -141,6 +206,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.session) {
         setSession(data.session);
         setUser(data.user);
+        if (data.user && data.session.access_token) {
+          await fetchProfileForUser(data.user.id, data.session.access_token);
+        }
       }
 
       return { error: null, user: data.user };
@@ -159,6 +227,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setSession(null);
     setUser(null);
+    setProfile(null);
   };
 
   const openAuthModal = (mode: AuthMode = 'signin') => {
@@ -174,6 +243,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const value: AuthContextValue = {
     user,
+    profile,
     session,
     token,
     loading,
@@ -181,6 +251,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signIn,
     signUp,
     signOut,
+    refreshProfile,
+    updateProfile,
     authModalOpen,
     authModalMode,
     openAuthModal,
