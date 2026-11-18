@@ -1,0 +1,39 @@
+# ==============================================================================
+# FoodWise AI — Netlify Production Configuration (netlify.toml)
+# ==============================================================================
+
+[build]
+  # Base directory where frontend package.json lives
+  base = "frontend"
+  
+  # Build command executed inside the base directory
+  command = "npm run build"
+  
+  # Directory containing compiled production output relative to base directory
+  publish = "dist"
+
+# ------------------------------------------------------------------------------
+# SPA Fallback Routing Rule
+# Redirects all navigation requests to index.html with HTTP status 200 (rewrite).
+# Ensures direct loads and refreshes of deep routes (/compare, /ai-search, 
+# /brands, /coupons, /saved, /profile) render cleanly without Netlify 404 errors.
+# ------------------------------------------------------------------------------
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ------------------------------------------------------------------------------
+# Production Security & Performance Headers
+# ------------------------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

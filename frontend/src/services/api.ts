@@ -17,7 +17,7 @@ import {
 } from '../types';
 
 const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-const API_BASE = env?.VITE_API_BASE_URL || '/api';
+const API_BASE = (env?.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
 
 export async function fetchFoods(filters: SearchFilters = {}, signal?: AbortSignal): Promise<FoodItem[]> {
   const params = new URLSearchParams();
