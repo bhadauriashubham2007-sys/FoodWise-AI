@@ -1,7 +1,14 @@
 import { URL } from 'node:url';
 import http from 'node:http';
 import https from 'node:https';
-import { PlatformType, LinkExtractionResult, CompareByLinkResponse, FoodItem } from '../types/index.js';
+import {
+  PlatformType,
+  LinkExtractionResult,
+  CompareByLinkResponse,
+  FoodItem,
+  MatchType,
+  LinkDataSource,
+} from '../types/index.js';
 import { ComparisonService, normalizeCityName, PriceOverrides } from './comparison.service.js';
 import {
   extractCleanUrl,
@@ -272,6 +279,48 @@ export class LinkParserService {
     // 5. Extract Details from URL including potential restaurant city
     const extracted = this.extractDetailsFromUrl(parsedUrl, sourcePlatform);
 
+    // Detect if this is an AppsFlyer OneLink or native app deep link with no public web destination
+    const parsedFinalUrl = parsedUrl;
+    const deepLinkVal =
+      parsedFinalUrl.searchParams.get('deep_link_value') ||
+      parsedFinalUrl.searchParams.get('af_dp');
+    const isOneLink =
+      initialHost.includes('onelink.me') ||
+      parsedFinalUrl.hostname.toLowerCase().includes('onelink.me');
+
+    const hasReadableDishParam = Boolean(
+      parsedFinalUrl.searchParams.get('dish') ||
+      parsedFinalUrl.searchParams.get('dish_name') ||
+      parsedFinalUrl.searchParams.get('item') ||
+      parsedFinalUrl.searchParams.get('item_name')
+    );
+
+    const isOpaqueAppDeepLink =
+      isOneLink &&
+      !hasReadableDishParam &&
+      (
+        Boolean(deepLinkVal && deepLinkVal.includes('resolve_link?id=')) ||
+        (initialHost.includes('onelink.me') && !extracted.foodName)
+      );
+
+    // 5b. Attempt safe HTML metadata scraping if URL slug didn't reveal a specific dish
+    let extractedFoodName = extracted.foodName;
+    let extractedRestaurantName = extracted.restaurantName;
+    let dataSource: LinkDataSource = 'url_parsed';
+    let isGenericLandingPage = false;
+
+    if (!isOpaqueAppDeepLink && !extractedFoodName && (!manualFoodName || manualFoodName.trim() === '')) {
+      const metadata = await this.fetchHtmlMetadata(finalUrlStr);
+      if (metadata.foodName) {
+        extractedFoodName = metadata.foodName;
+        extractedRestaurantName = metadata.restaurantName || extractedRestaurantName;
+        dataSource = 'metadata_scraped';
+      }
+      if (metadata.isGenericLandingPage) {
+        isGenericLandingPage = true;
+      }
+    }
+
     // 6. Validate Location Alignment: Check if link restaurant's city conflicts with active city
     if (extracted.city && city && city.trim() !== '') {
       const urlCityNorm = normalizeCityName(extracted.city);
@@ -282,17 +331,24 @@ export class LinkParserService {
           success: true,
           extraction: {
             url: cleanUrl,
+            resolvedUrl: finalUrlStr,
             sourcePlatform,
             isValidDomain: true,
             isAccessible: true,
-            foodName: manualFoodName?.trim() || extracted.foodName,
-            restaurantName: extracted.restaurantName,
+            foodName: manualFoodName?.trim() || extractedFoodName,
+            restaurantName: extractedRestaurantName,
             originalPriceRupees: manualPriceRupees,
             confidence: 'medium',
-            dataSource: manualFoodName ? 'manual_fallback' : 'url_parsed',
-            extractionNotes: `Link restaurant is in ${extracted.city}, but active city is ${city}.`,
+            dataSource: manualFoodName ? 'manual_fallback' : dataSource,
+            isOpaqueAppDeepLink,
+            isGenericLandingPage,
+            extractionNotes: `Link restaurant is in ${extracted.city}, but active city is set to ${city}. FoodWise compares local prices within the same operational city.`,
           },
+          matchType: 'none',
           equivalentItems: [],
+          dataProvenance: 'demo_catalogue',
+          disclosureNote:
+            'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
           message: `Location Mismatch: This link points to a restaurant in ${extracted.city}, but your active city is set to ${city}. FoodWise cannot compare inter-city delivery quotes. Please switch your active city or paste a link from ${city}.`,
         };
       }
@@ -312,7 +368,37 @@ export class LinkParserService {
           }
         : undefined;
 
-    // 7. Handle Manual Fallback vs Automatic URL Extraction
+    // 7. Handle Opaque Mobile In-App Share Links (e.g. zomato.onelink.me without web catalog)
+    if (isOpaqueAppDeepLink && (!manualFoodName || manualFoodName.trim() === '')) {
+      const extraction: LinkExtractionResult = {
+        url: cleanUrl,
+        resolvedUrl: finalUrlStr,
+        sourcePlatform,
+        isValidDomain: true,
+        isAccessible: false,
+        confidence: 'fallback_required',
+        dataSource: 'url_parsed',
+        isOpaqueAppDeepLink: true,
+        isGenericLandingPage: true,
+        extractionNotes:
+          'Detected Zomato mobile app share link (AppsFlyer OneLink). This link routes directly into the installed Zomato mobile application via an internal app token (resolve_link) rather than a public web page. To compare prices across Zomato, Swiggy, and Toing, please specify the food item name below.',
+      };
+
+      return {
+        success: true,
+        needsManualInput: true,
+        extraction,
+        matchType: 'none',
+        equivalentItems: [],
+        dataProvenance: 'demo_catalogue',
+        disclosureNote:
+          'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+        message:
+          'Mobile app share link detected. This link routes directly into the Zomato native app rather than a public web page. Please enter or confirm the dish name below to compare prices across Zomato, Swiggy, and Toing.',
+      };
+    }
+
+    // 8. Handle Manual Fallback Input (User provided dish name or refined search)
     if (manualFoodName && manualFoodName.trim() !== '') {
       const foodName = manualFoodName.trim();
       const searchMatches = this.comparisonService.searchFood({ query: foodName, city });
@@ -320,40 +406,55 @@ export class LinkParserService {
 
       const extraction: LinkExtractionResult = {
         url: cleanUrl,
+        resolvedUrl: finalUrlStr,
         sourcePlatform,
         isValidDomain: true,
         isAccessible: true,
         foodName,
-        restaurantName: extracted.restaurantName,
+        restaurantName: extractedRestaurantName,
         originalPriceRupees: manualPriceRupees,
         confidence: 'high',
         dataSource: 'manual_fallback',
-        extractionNotes: typeof manualPriceRupees === 'number'
-          ? `User manually specified "${foodName}" at ₹${manualPriceRupees} (source: ${sourcePlatform}).`
-          : `Food item was manually provided by user as "${foodName}".`,
+        isOpaqueAppDeepLink,
+        isGenericLandingPage,
+        extractionNotes:
+          typeof manualPriceRupees === 'number'
+            ? `User manually specified "${foodName}" at ₹${manualPriceRupees} (source: ${sourcePlatform}).`
+            : `Food item was manually provided by user as "${foodName}".`,
       };
 
-      // If active city has no listings at all in our catalogue
+      // If active city has no listings in our catalogue
       if (city && city.trim() !== '') {
         const anyCityListings = this.comparisonService.searchFood({ city });
         if (anyCityListings.length === 0) {
           return {
             success: true,
             extraction,
+            matchType: 'none',
             equivalentItems: [],
-            message: `No verified listings are currently available for ${city}. The available verified catalogue currently covers Bengaluru outlets. Please switch to Bengaluru in the location selector or try a local partner link.`,
+            dataProvenance: 'demo_catalogue',
+            disclosureNote:
+              'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+            message: `No listings are currently available in the demo catalogue for ${city}. The available demo catalogue currently covers Bengaluru outlets. Please switch to Bengaluru in the location selector.`,
           };
         }
       }
 
-      const verification = candidateMatch ? this.verifyMatchQuality(foodName, candidateMatch) : { isAcceptable: false };
+      const verification = candidateMatch
+        ? this.verifyMatchQuality(foodName, candidateMatch)
+        : { isAcceptable: false, matchType: 'none' as MatchType, matchScore: 0 };
 
-      if (!candidateMatch || !verification.isAcceptable) {
+      if (!candidateMatch || !verification.isAcceptable || verification.matchType === 'none') {
         return {
           success: true,
           extraction,
+          needsManualInput: true,
+          matchType: 'none',
           equivalentItems: [],
-          message: `Identified platform: ${sourcePlatform.toUpperCase()}, but no direct equivalent dishes were found in the catalogue for "${foodName}". Missing platform prices are not invented. Try a specific food keyword like "biryani", "pizza", or "momos".`,
+          dataProvenance: 'demo_catalogue',
+          disclosureNote:
+            'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+          message: `Identified platform: ${sourcePlatform.toUpperCase()}, but no direct equivalent dishes were found in the demo catalogue for "${foodName}". Missing platform prices are not invented. Try a specific food keyword like "biryani", "pizza", or "momos".`,
         };
       }
 
@@ -369,55 +470,80 @@ export class LinkParserService {
 
       return {
         success: true,
+        needsManualInput: false,
         extraction,
         matchedFoodItem,
+        matchType: verification.matchType,
+        matchScore: verification.matchScore,
         comparison: comparison || undefined,
         equivalentItems,
         cheapestQuote: comparison?.cheapestQuote,
         highestQuote: comparison?.highestQuote,
         savingsPaise: comparison?.savingsPaise,
-        message: `Successfully matched "${matchedFoodItem.name}" across all platforms!`,
+        dataProvenance: 'demo_catalogue',
+        disclosureNote:
+          'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+        message:
+          verification.matchType === 'exact'
+            ? `Found exact name match "${matchedFoodItem.name}" in demo catalogue! Showing price comparison across Zomato, Swiggy, and Toing.`
+            : `Matched similar name "${matchedFoodItem.name}" (${Math.round(verification.matchScore * 100)}% text similarity for "${foodName}") in demo catalogue. Showing price comparison across Zomato, Swiggy, and Toing.`,
       };
     }
 
-    // 8. Automatic Extraction from Permitted URL Metadata & Slugs
-    if (!extracted.foodName) {
-      // Prompt user for manual input fallback (Never pretend inaccessible data was retrieved)
+    // 9. Automatic Extraction: If food name could not be automatically determined
+    if (!extractedFoodName) {
       const extraction: LinkExtractionResult = {
         url: cleanUrl,
+        resolvedUrl: finalUrlStr,
         sourcePlatform,
         isValidDomain: true,
         isAccessible: false,
         confidence: 'fallback_required',
         dataSource: 'url_parsed',
-        extractionNotes:
-          `Verified ${sourcePlatform.toUpperCase()} platform link, but specific dish name could not be automatically determined from the link structure.`,
+        restaurantName: extractedRestaurantName,
+        isOpaqueAppDeepLink,
+        isGenericLandingPage,
+        extractionNotes: extractedRestaurantName
+          ? `Identified restaurant "${extractedRestaurantName}" on ${sourcePlatform.toUpperCase()}, but specific dish name could not be automatically determined from the page metadata or link structure.`
+          : `Verified ${sourcePlatform.toUpperCase()} platform link, but specific dish name could not be automatically determined from the page metadata or link structure.`,
       };
 
       return {
         success: true,
         needsManualInput: true,
         extraction,
+        matchType: 'none',
         equivalentItems: [],
-        message: `Valid ${sourcePlatform.toUpperCase()} link detected, but specific food item could not be auto-extracted. Please specify the dish name below.`,
+        dataProvenance: 'demo_catalogue',
+        disclosureNote:
+          'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+        message: extractedRestaurantName
+          ? `Identified restaurant "${extractedRestaurantName}" on ${sourcePlatform.toUpperCase()}, but specific food item could not be auto-extracted. Please specify the dish name below to compare prices.`
+          : `Valid ${sourcePlatform.toUpperCase()} link detected, but specific food item could not be auto-extracted. Please specify the dish name below to compare prices.`,
       };
     }
 
-    // 7. Search for equivalent dishes in our catalog respecting active city
-    const searchMatches = this.comparisonService.searchFood({ query: extracted.foodName, city });
+    // 10. Automatic Search in Catalogue using Extracted Food Name
+    const searchMatches = this.comparisonService.searchFood({ query: extractedFoodName, city });
     const candidateMatch = searchMatches[0];
 
     const extraction: LinkExtractionResult = {
       url: cleanUrl,
+      resolvedUrl: finalUrlStr,
       sourcePlatform,
       isValidDomain: true,
       isAccessible: true,
-      foodName: extracted.foodName,
-      restaurantName: extracted.restaurantName,
+      foodName: extractedFoodName,
+      restaurantName: extractedRestaurantName,
       originalPriceRupees: manualPriceRupees,
       confidence: extracted.confidence,
-      dataSource: 'url_parsed',
-      extractionNotes: `Extracted "${extracted.foodName}" ${extracted.restaurantName ? `from ${extracted.restaurantName}` : ''} via clean URL slug parsing.`,
+      dataSource,
+      isOpaqueAppDeepLink: false,
+      isGenericLandingPage: false,
+      extractionNotes:
+        dataSource === 'metadata_scraped'
+          ? `Automatically extracted "${extractedFoodName}" ${extractedRestaurantName ? `from ${extractedRestaurantName}` : ''} via web page metadata.`
+          : `Extracted "${extractedFoodName}" ${extractedRestaurantName ? `from ${extractedRestaurantName}` : ''} via clean URL slug parsing.`,
     };
 
     // If active city has no listings in our catalogue
@@ -427,24 +553,35 @@ export class LinkParserService {
         return {
           success: true,
           extraction,
+          matchType: 'none',
           equivalentItems: [],
-          message: `No verified listings are currently available for ${city}. The available verified catalogue currently covers Bengaluru outlets. Please switch to Bengaluru in the location selector or try a local partner link.`,
+          dataProvenance: 'demo_catalogue',
+          disclosureNote:
+            'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+          message: `No listings are currently available in the demo catalogue for ${city}. The available demo catalogue currently covers Bengaluru outlets. Please switch to Bengaluru in the location selector.`,
         };
       }
     }
 
-    const verification = candidateMatch ? this.verifyMatchQuality(extracted.foodName, candidateMatch) : { isAcceptable: false };
+    const verification = candidateMatch
+      ? this.verifyMatchQuality(extractedFoodName, candidateMatch)
+      : { isAcceptable: false, matchType: 'none' as MatchType, matchScore: 0 };
 
-    if (!candidateMatch || !verification.isAcceptable) {
+    if (!candidateMatch || !verification.isAcceptable || verification.matchType === 'none') {
       return {
         success: true,
         extraction,
         needsManualInput: true,
+        matchType: 'none',
         equivalentItems: [],
-        message: `Found food "${extracted.foodName}" on ${sourcePlatform.toUpperCase()}, but no direct equivalent exists in our catalogue. Please confirm or refine the dish name.`,
+        dataProvenance: 'demo_catalogue',
+        disclosureNote:
+          'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+        message: `Found food "${extractedFoodName}" on ${sourcePlatform.toUpperCase()}, but no direct equivalent exists in our demo catalogue. Please confirm or refine the dish name.`,
       };
     }
 
+    // Automatic match successful: build comparison without prompting manual input!
     const comparison = this.comparisonService.getComparison(candidateMatch.id, undefined, priceOverrides);
     const matchedFoodItem: FoodItem = comparison ? comparison.foodItem : candidateMatch;
 
@@ -456,75 +593,88 @@ export class LinkParserService {
 
     return {
       success: true,
+      needsManualInput: false,
       extraction,
       matchedFoodItem,
+      matchType: verification.matchType,
+      matchScore: verification.matchScore,
       comparison: comparison || undefined,
       equivalentItems,
       cheapestQuote: comparison?.cheapestQuote,
       highestQuote: comparison?.highestQuote,
       savingsPaise: comparison?.savingsPaise,
-      message: `Found "${matchedFoodItem.name}"! Showing lowest price across Zomato, Swiggy, and Toing.`,
+      dataProvenance: 'demo_catalogue',
+      disclosureNote:
+        'FoodWise Demo Catalogue Data: Reference prices from our curated demo catalogue are used for comparison.',
+      message:
+        verification.matchType === 'exact'
+          ? `Found exact name match "${matchedFoodItem.name}" in demo catalogue! Showing lowest price across Zomato, Swiggy, and Toing.`
+          : `Matched similar name "${matchedFoodItem.name}" (${Math.round(verification.matchScore * 100)}% text similarity for "${extractedFoodName}") in demo catalogue. Showing lowest price across Zomato, Swiggy, and Toing.`,
     };
   }
 
   /**
    * Cross-platform matching verification:
    * Ensures dish names, dietary preference, and core food categories strictly align.
-   * Prevents unrelated dishes (e.g. veg vs non-veg, or sushi matching a kathi roll) from being treated as equivalent.
+   * Clearly distinguishes exact matches, similar alternatives, and unavailable dishes.
    */
-  private verifyMatchQuality(
+  public verifyMatchQuality(
     searchedDish: string,
     candidate: { name: string; category: string; dietary: string; cuisine?: string }
-  ): { isAcceptable: boolean; reason?: string } {
+  ): { isAcceptable: boolean; matchType: MatchType; matchScore: number; reason?: string } {
     const s = searchedDish.toLowerCase().trim();
-    const cName = candidate.name.toLowerCase();
+    const cName = candidate.name.toLowerCase().trim();
     const cCat = candidate.category.toLowerCase();
     const cCuis = candidate.cuisine ? candidate.cuisine.toLowerCase() : '';
 
-    // 1. Dietary mismatch check
+    // 1. Dietary mismatch check (veg vs non-veg must NEVER mix)
     const isSearchedNonVeg =
       s.includes('chicken') ||
       s.includes('mutton') ||
       s.includes('fish') ||
       s.includes('egg') ||
       s.includes('meat') ||
-      s.includes('non-veg');
+      s.includes('non-veg') ||
+      s.includes('prawn');
     const isSearchedVeg =
       s.includes('veg') ||
       s.includes('paneer') ||
       s.includes('dal') ||
-      s.includes('mushroom');
+      s.includes('mushroom') ||
+      s.includes('gobi') ||
+      s.includes('aloo');
 
     if (isSearchedNonVeg && candidate.dietary === 'veg') {
-      return { isAcceptable: false, reason: 'Dietary mismatch: searched non-veg but matched veg' };
+      return {
+        isAcceptable: false,
+        matchType: 'none',
+        matchScore: 0,
+        reason: 'Dietary mismatch: searched non-veg but candidate is veg',
+      };
     }
     if (isSearchedVeg && candidate.dietary === 'non-veg') {
-      return { isAcceptable: false, reason: 'Dietary mismatch: searched veg but matched non-veg' };
+      return {
+        isAcceptable: false,
+        matchType: 'none',
+        matchScore: 0,
+        reason: 'Dietary mismatch: searched veg but candidate is non-veg',
+      };
     }
 
-    // 2. Token overlap threshold - require at least 50% of meaningful tokens to match
-    const tokens = s
-      .replace(/[^\w\s]/g, ' ')
-      .split(/\s+/)
-      .filter((t) => t.length > 2 && t !== 'with' && t !== 'and' && t !== 'the' && t !== 'for');
-
-    if (tokens.length > 0) {
-      let matchedTokens = 0;
-      for (const t of tokens) {
-        if (cName.includes(t) || cCat.includes(t) || cCuis.includes(t)) {
-          matchedTokens++;
-        }
-      }
-      const ratio = matchedTokens / tokens.length;
-      if (ratio < 0.5) {
+    // 2. Unsupported foreign dish keywords
+    const unsupportedKeywords = ['sushi', 'taco', 'tacos', 'burrito', 'ramen', 'dim sum', 'steak'];
+    for (const uk of unsupportedKeywords) {
+      if (s.includes(uk) && !cName.includes(uk)) {
         return {
           isAcceptable: false,
-          reason: `Insufficient token match (${matchedTokens}/${tokens.length} matched)`,
+          matchType: 'none',
+          matchScore: 0,
+          reason: `Unsupported dish type: ${uk}`,
         };
       }
     }
 
-    // 3. Core food noun checks
+    // 3. Core food noun checks (e.g. biryani cannot match pizza or momos)
     const coreNouns = [
       'biryani',
       'pizza',
@@ -542,23 +692,382 @@ export class LinkParserService {
       'thali',
       'samosa',
       'chaat',
+      'roll',
     ];
 
     for (const noun of coreNouns) {
       if (s.includes(noun) && !cName.includes(noun) && !cCat.includes(noun)) {
-        return { isAcceptable: false, reason: `Category mismatch: expected ${noun}` };
+        return {
+          isAcceptable: false,
+          matchType: 'none',
+          matchScore: 0,
+          reason: `Category mismatch: expected ${noun}`,
+        };
       }
     }
 
-    // 4. Unsupported foreign dish keywords
-    const unsupportedKeywords = ['sushi', 'taco', 'tacos', 'burrito', 'ramen', 'dim sum', 'steak'];
-    for (const uk of unsupportedKeywords) {
-      if (s.includes(uk) && !cName.includes(uk)) {
-        return { isAcceptable: false, reason: `Unsupported dish type: ${uk}` };
+    // 4. Token normalization & string equality
+    const normalize = (str: string) =>
+      str
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normS = normalize(s);
+    const normC = normalize(cName);
+
+    // Exact string match after punctuation and whitespace stripping
+    if (normS === normC) {
+      return { isAcceptable: true, matchType: 'exact', matchScore: 1.0 };
+    }
+
+    const stopWords = new Set(['with', 'and', 'the', 'for', 'from', 'order', 'online', 'single', 'pcs', 'special']);
+    const tokensS = normS
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !stopWords.has(t));
+    const tokensC = normC
+      .split(/\s+/)
+      .filter((t) => t.length > 2 && !stopWords.has(t));
+
+    if (tokensS.length === 0 || tokensC.length === 0) {
+      return {
+        isAcceptable: false,
+        matchType: 'none',
+        matchScore: 0,
+        reason: 'Insufficient search keywords',
+      };
+    }
+
+    // Identical token sets (e.g. word order difference like "Dum Biryani Chicken" vs "Chicken Dum Biryani")
+    const setS = new Set(tokensS);
+    const setC = new Set(tokensC);
+    const isSameTokenSet =
+      setS.size === setC.size && [...setS].every((t) => setC.has(t));
+
+    if (isSameTokenSet) {
+      return { isAcceptable: true, matchType: 'exact', matchScore: 1.0 };
+    }
+
+    // Bidirectional Overlap: Sørensen–Dice Coefficient (2 * |Intersection| / (|S| + |C|))
+    let intersectionCount = 0;
+    for (const t of setS) {
+      if (setC.has(t)) {
+        intersectionCount++;
       }
     }
 
-    return { isAcceptable: true };
+    const recall = intersectionCount / setS.size;
+    const diceCoefficient = (2 * intersectionCount) / (setS.size + setC.size);
+    const matchScore = Math.round(diceCoefficient * 100) / 100;
+
+    // Must match at least 50% of user query tokens and have a Dice score >= 0.40
+    if (recall < 0.5 || diceCoefficient < 0.40) {
+      return {
+        isAcceptable: false,
+        matchType: 'none',
+        matchScore,
+        reason: `Insufficient token match (recall: ${Math.round(recall * 100)}%, dice: ${Math.round(diceCoefficient * 100)}%)`,
+      };
+    }
+
+    // An approximate match can NEVER receive 1.0. Maximum score for an approximate match is capped at 0.95.
+    const cappedScore = Math.min(matchScore, 0.95);
+
+    return {
+      isAcceptable: true,
+      matchType: 'close_equivalent',
+      matchScore: cappedScore,
+    };
+  }
+
+  /**
+   * Safely fetches page HTML to extract OpenGraph (og:title, og:description),
+   * Schema.org JSON-LD structured data, and HTML <title>.
+   * Strictly enforces:
+   * - Destination host must be an authorized platform host.
+   * - SSRF protection: rejects loopback and private RFC1918 IPs.
+   * - Maximum 64KB body read to prevent memory exhaustion.
+   * - 3000ms timeout with immediate abort.
+   * - Fails gracefully on any network error or non-200 status.
+   */
+  public async fetchHtmlMetadata(
+    targetUrl: string
+  ): Promise<{
+    foodName?: string;
+    restaurantName?: string;
+    rawTitle?: string;
+    isGenericLandingPage?: boolean;
+  }> {
+    return new Promise((resolve) => {
+      try {
+        const u = new URL(targetUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+          return resolve({});
+        }
+
+        const host = u.hostname.toLowerCase();
+        const detectedPlatform = detectPlatformFromUrl(targetUrl);
+        if (
+          detectedPlatform === 'unknown' ||
+          this.isPrivateOrLocalHost(host) ||
+          !isAllowedHost(host, detectedPlatform)
+        ) {
+          return resolve({});
+        }
+
+        const transport = u.protocol === 'https:' ? https : http;
+        const req = transport.request(
+          u,
+          {
+            method: 'GET',
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
+            timeout: 3000,
+          },
+          (res) => {
+            const statusCode = res.statusCode || 0;
+            if (statusCode < 200 || statusCode >= 300) {
+              res.destroy();
+              return resolve({});
+            }
+
+            let body = '';
+            let bytesRead = 0;
+            const maxBytes = 65536; // 64 KB limit
+
+            res.setEncoding('utf8');
+            res.on('data', (chunk: string) => {
+              body += chunk;
+              bytesRead += Buffer.byteLength(chunk, 'utf8');
+              if (bytesRead >= maxBytes) {
+                res.destroy();
+              }
+            });
+
+            res.on('end', () => {
+              const parsed = this.parseHtmlMetadataString(body);
+              resolve(parsed);
+            });
+
+            res.on('close', () => {
+              const parsed = this.parseHtmlMetadataString(body);
+              resolve(parsed);
+            });
+          }
+        );
+
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({});
+        });
+
+        req.on('error', () => {
+          resolve({});
+        });
+
+        req.end();
+      } catch {
+        resolve({});
+      }
+    });
+  }
+
+  /**
+   * Extracts food name, restaurant name, and page title from HTML markup
+   * without executing any scripts.
+   */
+  public parseHtmlMetadataString(html: string): {
+    foodName?: string;
+    restaurantName?: string;
+    rawTitle?: string;
+    isGenericLandingPage?: boolean;
+  } {
+    if (!html || html.trim() === '') {
+      return {};
+    }
+
+    const lowerHtml = html.toLowerCase();
+    const isGenericLanding =
+      lowerHtml.includes('zomato mobile') ||
+      lowerHtml.includes('download the free zomato app') ||
+      lowerHtml.includes('download the swiggy app') ||
+      lowerHtml.includes('order food online on app');
+
+    // Extract OpenGraph Title & Description
+    const ogTitleMatch =
+      html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i);
+    const ogTitle = ogTitleMatch ? this.decodeHtmlEntities(ogTitleMatch[1].trim()) : undefined;
+
+    // Extract Twitter Title
+    const twitterTitleMatch =
+      html.match(/<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:title["']/i);
+    const twitterTitle = twitterTitleMatch ? this.decodeHtmlEntities(twitterTitleMatch[1].trim()) : undefined;
+
+    // Extract HTML <title>
+    const titleTagMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const titleTag = titleTagMatch ? this.decodeHtmlEntities(titleTagMatch[1].trim()) : undefined;
+
+    const rawTitle = ogTitle || twitterTitle || titleTag;
+
+    if (
+      rawTitle &&
+      (rawTitle.toLowerCase() === 'zomato mobile' ||
+        rawTitle.toLowerCase().includes('download the free zomato app') ||
+        rawTitle.toLowerCase() === 'swiggy' ||
+        rawTitle.toLowerCase() === 'toing' ||
+        rawTitle.toLowerCase().includes('order food online on app'))
+    ) {
+      return {
+        rawTitle,
+        isGenericLandingPage: true,
+      };
+    }
+
+    // Try JSON-LD structured data
+    let jsonLdFood: string | undefined;
+    let jsonLdRestaurant: string | undefined;
+    const jsonLdRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let jsonMatch: RegExpExecArray | null;
+
+    while ((jsonMatch = jsonLdRegex.exec(html)) !== null) {
+      try {
+        const data = JSON.parse(jsonMatch[1]);
+        const items = Array.isArray(data) ? data : [data];
+        for (const item of items) {
+          if (!item || typeof item !== 'object') continue;
+          const type = (item['@type'] || '').toLowerCase();
+          if (type === 'product' || type === 'menuitem') {
+            if (item.name && typeof item.name === 'string') {
+              jsonLdFood = this.cleanExtractedTitle(item.name);
+            }
+          }
+          if (type === 'restaurant' || type === 'foodestablishment') {
+            if (item.name && typeof item.name === 'string') {
+              jsonLdRestaurant = this.cleanExtractedTitle(item.name);
+            }
+          }
+        }
+      } catch {
+        // ignore malformed JSON-LD
+      }
+    }
+
+    if (jsonLdFood) {
+      return {
+        foodName: jsonLdFood,
+        restaurantName: jsonLdRestaurant,
+        rawTitle,
+        isGenericLandingPage: false,
+      };
+    }
+
+    // Parse food and restaurant from candidate title string
+    const candidateTitle = ogTitle || twitterTitle || titleTag;
+    if (candidateTitle) {
+      const parsedFromTitle = this.extractDishAndRestaurantFromTitle(candidateTitle);
+      if (parsedFromTitle.foodName || parsedFromTitle.restaurantName) {
+        return {
+          foodName: parsedFromTitle.foodName,
+          restaurantName: parsedFromTitle.restaurantName || jsonLdRestaurant,
+          rawTitle,
+          isGenericLandingPage: false,
+        };
+      }
+    }
+
+    return {
+      rawTitle,
+      restaurantName: jsonLdRestaurant,
+      isGenericLandingPage: isGenericLanding,
+    };
+  }
+
+  /**
+   * Helper to clean strings extracted from meta or JSON-LD
+   */
+  public cleanExtractedTitle(title: string): string {
+    return title
+      .replace(/\s*\|\s*Zomato.*$/i, '')
+      .replace(/\s*-\s*Zomato.*$/i, '')
+      .replace(/\s*\|\s*Swiggy.*$/i, '')
+      .replace(/\s*-\s*Order Online.*$/i, '')
+      .replace(/\s*-\s*Swiggy.*$/i, '')
+      .replace(/\s*\|\s*Toing.*$/i, '')
+      .replace(/\s*-\s*Toing.*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Parse dish and restaurant names from formatted title tag or og:title
+   */
+  public extractDishAndRestaurantFromTitle(title: string): {
+    foodName?: string;
+    restaurantName?: string;
+  } {
+    const cleaned = this.cleanExtractedTitle(title);
+
+    // Pattern 1: "Order <Dish> from <Restaurant>..." (Swiggy / Zomato order titles)
+    const orderFromMatch = cleaned.match(/^Order\s+(.+?)\s+from\s+(.+?)(?:,\s*.*)?$/i);
+    if (orderFromMatch) {
+      return {
+        foodName: orderFromMatch[1].trim(),
+        restaurantName: orderFromMatch[2].trim(),
+      };
+    }
+
+    // Pattern 2: "<Dish> at <Restaurant>" (Zomato dish titles)
+    const dishAtMatch = cleaned.match(/^(.+?)\s+at\s+(.+?)(?:,\s*.*)?$/i);
+    if (dishAtMatch) {
+      return {
+        foodName: dishAtMatch[1].trim(),
+        restaurantName: dishAtMatch[2].trim(),
+      };
+    }
+
+    // Pattern 3: Separated by | or - (e.g. "Spicy Paneer Tikka Pizza | La Pino'z Pizza")
+    const parts = cleaned.split(/\s+[|\-]\s+/).map((p) => p.trim());
+    if (parts.length >= 2) {
+      const p0 = parts[0].toLowerCase();
+      if (!p0.includes('restaurant') && !p0.includes('order online') && !p0.includes('delivery')) {
+        return {
+          foodName: parts[0],
+          restaurantName: parts[1],
+        };
+      }
+    }
+
+    if (
+      cleaned.length > 2 &&
+      !cleaned.toLowerCase().includes('restaurant') &&
+      !cleaned.toLowerCase().includes('order food online')
+    ) {
+      return {
+        foodName: cleaned,
+      };
+    }
+
+    return {};
+  }
+
+  /**
+   * Decode common HTML entities
+   */
+  private decodeHtmlEntities(str: string): string {
+    return str
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, ' ');
   }
 
   /**
@@ -669,8 +1178,8 @@ export class LinkParserService {
       }
     }
 
-    // If no explicit food keyword was in the slug, but there's a specific dish-like slug
-    if (!foundFood && nonCitySegments.length >= 1) {
+    // If no explicit food keyword was in the slug, only treat as food if there are 2+ segments (restaurant/dish)
+    if (!foundFood && nonCitySegments.length >= 2) {
       const lastSeg = nonCitySegments[nonCitySegments.length - 1];
       if (lastSeg.includes('-') && lastSeg.length > 5 && isNaN(Number(lastSeg))) {
         foundFood = this.cleanSlug(lastSeg);

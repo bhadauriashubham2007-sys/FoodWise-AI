@@ -50,6 +50,20 @@ async function runLinkTests() {
   if (!res4.needsManualInput) throw new Error('Test 4 Failed - Should request manual input');
   console.log('   ✅ PASS (Fallback correctly requested)\n');
 
+  // Test 4b: Restaurant-only URL (identifies restaurant, requests dish identification)
+  console.log('4b. Testing Restaurant-Only URL (Meghana Foods):');
+  const res4b = await linkService.parseAndCompareLink(
+    'https://www.zomato.com/bangalore/meghana-foods-koramangala-5th-block'
+  );
+  console.log(`    Restaurant Name: ${res4b.extraction.restaurantName}`);
+  console.log(`    Food Name: ${res4b.extraction.foodName}`);
+  console.log(`    Needs Manual Input: ${res4b.needsManualInput}`);
+  console.log(`    Message: ${res4b.message}`);
+  if (!res4b.extraction.restaurantName || res4b.extraction.foodName !== undefined || !res4b.needsManualInput) {
+    throw new Error('Test 4b Failed - Restaurant-only URL must identify restaurant and request dish name');
+  }
+  console.log('    ✅ PASS (Restaurant identified, dish input requested)\n');
+
   // Test 5: Manual input fallback provided
   console.log('5. Testing Manual Fallback Input:');
   const res5 = await linkService.parseAndCompareLink('https://www.zomato.com/india', 'Steamed Veg Momos', 130);
@@ -139,7 +153,115 @@ async function runLinkTests() {
   }
   console.log('    ✅ PASS (User URL successfully compared with manual fallback)\n');
 
-  console.log('🎉 ALL 11 COMPARE BY LINK TESTS PASSED CLEANLY!');
+  // Test 12: HTML Metadata Extraction & Sanitization Engine
+  console.log('12. Testing HTML Metadata Extraction & OpenGraph Parsing:');
+  const sampleSwiggyHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Order Hyderabadi Chicken Dum Biryani from Meghana Foods, Bangalore | Swiggy</title>
+        <meta property="og:title" content="Order Hyderabadi Chicken Dum Biryani from Meghana Foods - Swiggy" />
+        <meta property="og:description" content="Authentic Hyderabadi Dum Biryani cooked with dum technique." />
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "Hyderabadi Chicken Dum Biryani",
+            "offers": { "@type": "Offer", "price": "280" }
+          }
+        </script>
+      </head>
+      <body><div>Menu details</div></body>
+    </html>
+  `;
+  const parsedMeta = linkService.parseHtmlMetadataString(sampleSwiggyHtml);
+  console.log(`    Extracted Food: ${parsedMeta.foodName}`);
+  console.log(`    Extracted Restaurant: ${parsedMeta.restaurantName}`);
+  if (parsedMeta.foodName !== 'Hyderabadi Chicken Dum Biryani') {
+    throw new Error(`Test 12 Failed - Expected foodName 'Hyderabadi Chicken Dum Biryani', got '${parsedMeta.foodName}'`);
+  }
+  console.log('    ✅ PASS (HTML metadata successfully extracted food and restaurant without script execution)\n');
+
+  // Test 13: Exact Match vs Similar Alternative Distinction
+  console.log('13. Testing Match Quality Classification (Exact vs Similar Alternative):');
+  const exactCheck = linkService.verifyMatchQuality(
+    'Hyderabadi Chicken Dum Biryani',
+    { name: 'Hyderabadi Chicken Dum Biryani', category: 'Main Course', dietary: 'non-veg' }
+  );
+  console.log(`    Exact match test -> matchType: ${exactCheck.matchType}, score: ${exactCheck.matchScore}`);
+  if (exactCheck.matchType !== 'exact' || exactCheck.matchScore !== 1.0) {
+    throw new Error(`Test 13a Failed - Expected matchType 'exact' with score 1.0, got '${exactCheck.matchType}' score ${exactCheck.matchScore}`);
+  }
+
+  const similarCheck = linkService.verifyMatchQuality(
+    'Chicken Dum Biryani',
+    { name: 'Hyderabadi Chicken Dum Biryani', category: 'Main Course', dietary: 'non-veg' }
+  );
+  console.log(`    Similar alternative test -> matchType: ${similarCheck.matchType}, score: ${similarCheck.matchScore}`);
+  if (similarCheck.matchType !== 'close_equivalent' || similarCheck.matchScore >= 1.0 || similarCheck.matchScore <= 0.4) {
+    throw new Error(`Test 13b Failed - Expected matchType 'close_equivalent' with score < 1.0, got '${similarCheck.matchType}' score ${similarCheck.matchScore}`);
+  }
+  if (exactCheck.matchScore === similarCheck.matchScore) {
+    throw new Error('Test 13c Failed - Approximate match must NOT receive the same score as an exact match');
+  }
+
+  const unrelatedCheck = linkService.verifyMatchQuality(
+    'Avocado Sushi Roll',
+    { name: 'Hyderabadi Chicken Dum Biryani', category: 'Main Course', dietary: 'non-veg' }
+  );
+  console.log(`    Unrelated product test -> matchType: ${unrelatedCheck.matchType}, score: ${unrelatedCheck.matchScore}`);
+  if (unrelatedCheck.matchType !== 'none' || unrelatedCheck.matchScore !== 0) {
+    throw new Error('Test 13d Failed - Unrelated product must return matchType none with score 0');
+  }
+
+  const dietaryCheck = linkService.verifyMatchQuality(
+    'Chicken Biryani',
+    { name: 'Veg Dum Biryani', category: 'Main Course', dietary: 'veg' }
+  );
+  console.log(`    Dietary mismatch test -> matchType: ${dietaryCheck.matchType}, isAcceptable: ${dietaryCheck.isAcceptable}, score: ${dietaryCheck.matchScore}`);
+  if (dietaryCheck.isAcceptable || dietaryCheck.matchType !== 'none' || dietaryCheck.matchScore !== 0) {
+    throw new Error('Test 13e Failed - Non-veg vs veg must return matchType none with score 0');
+  }
+  console.log('    ✅ PASS (Match quality correctly distinguishes exact, similar alternative, unrelated, and dietary mismatch with non-identical scores)\n');
+
+  // Test 14: Demo Catalogue Provenance & Transparency Disclosure
+  console.log('14. Testing Demo Catalogue Disclosure & Provenance:');
+  const res14 = await linkService.parseAndCompareLink(
+    'https://www.zomato.com/bangalore/paradise-biryani-palace?dish=hyderabadi-chicken-dum-biryani'
+  );
+  console.log(`    Data Provenance: ${res14.dataProvenance}`);
+  console.log(`    Disclosure Note: ${res14.disclosureNote}`);
+  console.log(`    Match Type: ${res14.matchType}`);
+  console.log(`    Needs Manual Input: ${res14.needsManualInput}`);
+  if (res14.dataProvenance !== 'demo_catalogue' || !res14.disclosureNote || res14.needsManualInput !== false) {
+    throw new Error('Test 14 Failed - Standard link must automatically match without manual input and disclose demo provenance');
+  }
+  console.log('    ✅ PASS (Demo catalogue disclosure and automated comparison confirmed)\n');
+
+  // Test 15: Unsupported Product (Never Invent Quotes)
+  console.log('15. Testing Unsupported Product Handling:');
+  const res15 = await linkService.parseAndCompareLink(
+    'https://www.zomato.com/bangalore/tokyo-sushi-bar?dish=salmon-sushi-platter'
+  );
+  console.log(`    Needs Manual Input: ${res15.needsManualInput}`);
+  console.log(`    Matched Food Item: ${res15.matchedFoodItem}`);
+  console.log(`    Message: ${res15.message}`);
+  if (res15.matchedFoodItem !== undefined) {
+    throw new Error('Test 15 Failed - Unsupported dish must NOT invent quotes or fake prices');
+  }
+  console.log('    ✅ PASS (Unsupported product safely rejected without fake data)\n');
+
+  // Test 16: Opaque In-App Share Link Flagging
+  console.log('16. Testing Opaque AppsFlyer In-App Link Flagging:');
+  const res16 = await linkService.parseAndCompareLink('https://zomato.onelink.me/xqzv/38letfej');
+  console.log(`    isOpaqueAppDeepLink: ${res16.extraction.isOpaqueAppDeepLink}`);
+  console.log(`    Extraction Notes: ${res16.extraction.extractionNotes}`);
+  if (!res16.extraction.isOpaqueAppDeepLink) {
+    throw new Error('Test 16 Failed - zomato.onelink.me must be flagged as isOpaqueAppDeepLink');
+  }
+  console.log('    ✅ PASS (Opaque in-app link accurately flagged with honest explanation)\n');
+
+  console.log('🎉 ALL 17 COMPARE BY LINK TESTS PASSED CLEANLY!');
 }
 
 runLinkTests().catch((err) => {

@@ -188,7 +188,9 @@ export interface AISearchResponse {
   matchedCoupons: CouponRule[];
 }
 
-export type LinkDataSource = 'url_parsed' | 'manual_fallback' | 'demo_catalog_match';
+export type LinkDataSource = 'metadata_scraped' | 'url_parsed' | 'manual_fallback' | 'demo_catalog_match';
+
+export type MatchType = 'exact' | 'close_equivalent' | 'category_match' | 'none';
 
 export interface LinkExtractionResult {
   url: string;
@@ -201,6 +203,9 @@ export interface LinkExtractionResult {
   confidence: 'high' | 'medium' | 'fallback_required';
   dataSource: LinkDataSource;
   extractionNotes: string;
+  resolvedUrl?: string;
+  isOpaqueAppDeepLink?: boolean;
+  isGenericLandingPage?: boolean;
 }
 
 export interface CompareByLinkResponse {
@@ -208,12 +213,16 @@ export interface CompareByLinkResponse {
   extraction: LinkExtractionResult;
   needsManualInput?: boolean;
   matchedFoodItem?: FoodItem;
+  matchType?: MatchType;
+  matchScore?: number;
   comparison?: ComparisonResult;
   equivalentItems: FoodItem[];
   cheapestQuote?: PlatformPriceQuote;
   highestQuote?: PlatformPriceQuote;
   savingsPaise?: number;
   message: string;
+  dataProvenance?: 'demo_catalogue';
+  disclosureNote?: string;
 }
 
 export * from './brand.types.js';

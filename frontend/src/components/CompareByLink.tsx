@@ -36,6 +36,8 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
   const [manualFoodName, setManualFoodName] = useState('');
   const [manualPrice, setManualPrice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState<number>(0);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CompareByLinkResponse | null>(null);
 
@@ -64,6 +66,10 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
     try {
       setLoading(true);
       setError(null);
+      setLoadingStep(1);
+
+      const t1 = setTimeout(() => setLoadingStep(2), 400);
+      const t2 = setTimeout(() => setLoadingStep(3), 900);
 
       const res = await compareByLink(
         inputUrl,
@@ -72,7 +78,10 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
         activeCity
       );
 
+      clearTimeout(t1);
+      clearTimeout(t2);
       setResult(res);
+      setShowEditForm(false);
 
       if (!res.success && res.message) {
         setError(res.message);
@@ -82,6 +91,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
       setError(err?.message || 'Unable to analyze link. Please check the URL and try again.');
     } finally {
       setLoading(false);
+      setLoadingStep(0);
     }
   };
 
@@ -91,6 +101,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
     setManualPrice('');
     setResult(null);
     setError(null);
+    setShowEditForm(false);
   };
 
   const getPlatformMeta = (platform: string) => {
@@ -212,6 +223,54 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
           </div>
         </form>
 
+        {/* Progressive Loading Status Indicator */}
+        {loading && (
+          <div className="mt-6 max-w-3xl p-4 rounded-2xl bg-orange-50/90 border border-orange-200 text-stone-800 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#FF5E1E]">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>Analyzing Link & Performing Comparison...</span>
+            </div>
+            <div className="space-y-1.5 text-xs pt-1">
+              <div
+                className={`flex items-center gap-2 ${
+                  loadingStep >= 1 ? 'text-stone-900 font-semibold' : 'text-stone-400'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    loadingStep >= 1 ? 'bg-[#FF5E1E]' : 'bg-stone-300'
+                  }`}
+                />
+                <span>1. Resolving link & following redirects safely (SSRF protected)</span>
+              </div>
+              <div
+                className={`flex items-center gap-2 ${
+                  loadingStep >= 2 ? 'text-stone-900 font-semibold' : 'text-stone-400'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    loadingStep >= 2 ? 'bg-[#FF5E1E]' : 'bg-stone-300'
+                  }`}
+                />
+                <span>2. Extracting food item & restaurant details from page metadata</span>
+              </div>
+              <div
+                className={`flex items-center gap-2 ${
+                  loadingStep >= 3 ? 'text-stone-900 font-semibold' : 'text-stone-400'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    loadingStep >= 3 ? 'bg-[#FF5E1E]' : 'bg-stone-300'
+                  }`}
+                />
+                <span>3. Calculating prices & fees across Zomato, Swiggy, and Toing</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Error Notification */}
         {error && (
           <div className="mt-6 max-w-3xl p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs sm:text-sm flex items-start gap-2.5">
@@ -223,20 +282,35 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
           </div>
         )}
 
-        {/* Fallback Form: Triggered when URL is valid but dish name cannot be auto-extracted */}
-        {result?.needsManualInput && (
+        {/* Fallback Form: Triggered when URL is valid but dish name cannot be auto-extracted, or user requested edit */}
+        {(result?.needsManualInput || showEditForm) && (
           <div className="mt-6 max-w-3xl bg-amber-50/80 rounded-2xl p-5 border border-amber-200 text-amber-950 space-y-4">
-            <div className="flex items-start gap-2.5">
-              <HelpCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-bold text-sm text-amber-900">
-                  Manual Details Fallback
-                </h4>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  We confirmed your {result.extraction.sourcePlatform.toUpperCase()} link! To ensure 100% price accuracy, please type the food name below:
+            {/* Dedicated In-App Deep Link Notice */}
+            {result?.extraction?.isOpaqueAppDeepLink ? (
+              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs space-y-1">
+                <div className="flex items-center gap-2 font-bold text-blue-950">
+                  <Info className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                  <span>📱 In-App Mobile Deep Link (AppsFlyer OneLink) Detected</span>
+                </div>
+                <p className="text-blue-800 leading-relaxed pl-6">
+                  This link routes directly into the installed Zomato mobile application via an internal app token rather than a public web page. To compare prices across Zomato, Swiggy, and Toing, please specify the food dish name from your Zomato app below.
                 </p>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-start gap-2.5">
+                <HelpCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="font-bold text-sm text-amber-900">
+                    {showEditForm ? 'Refine Dish Search' : 'Manual Dish Search'}
+                  </h4>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    {result?.extraction?.sourcePlatform
+                      ? `We confirmed your ${result.extraction.sourcePlatform.toUpperCase()} link! To compare prices across platforms, please enter or confirm the food name below:`
+                      : 'To compare prices across Zomato, Swiggy, and Toing, please enter the food dish name below:'}
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
               <div className="sm:col-span-2">
@@ -266,21 +340,41 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleCompare(url, manualFoodName, manualPrice)}
-              disabled={loading || !manualFoodName.trim()}
-              className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-[#FF5E1E] disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center gap-1.5"
-            >
-              <TrendingDown className="w-3.5 h-3.5" />
-              <span>Search Across All Platforms</span>
-            </button>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => handleCompare(url, manualFoodName, manualPrice)}
+                disabled={loading || !manualFoodName.trim()}
+                className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-[#FF5E1E] disabled:opacity-50 text-white font-bold text-xs transition-colors flex items-center gap-1.5"
+              >
+                <TrendingDown className="w-3.5 h-3.5" />
+                <span>Compare Across All Platforms</span>
+              </button>
+
+              {showEditForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditForm(false)}
+                  className="px-3.5 py-2.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {/* Results Section */}
         {result?.matchedFoodItem && (
           <div className="mt-8 pt-8 border-t border-stone-200 max-w-4xl space-y-6">
+            {/* Demo Data Transparency Notice */}
+            <div className="p-3 bg-stone-50 border border-stone-200/90 rounded-2xl text-stone-600 text-xs flex items-center gap-2.5">
+              <Info className="w-4 h-4 text-stone-400 flex-shrink-0" />
+              <span>
+                <strong>Demo Catalogue Disclosure:</strong> Comparisons are calculated using FoodWise reference demo data. Prices and delivery fees are simulated for demonstration and may differ from real-time live platform checkout.
+              </span>
+            </div>
+
             {/* Detection Summary Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-100/70 p-4 rounded-2xl border border-stone-200">
               <div className="flex items-center gap-3">
@@ -292,6 +386,20 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
                     <span className="text-xs font-bold text-stone-900">
                       Detected: {result.extraction.foodName}
                     </span>
+
+                    {/* Match Type Distinction Badge */}
+                    {result.matchType === 'exact' ? (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                        Exact Name Match
+                      </span>
+                    ) : result.matchType === 'close_equivalent' ? (
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                        <Info className="w-3 h-3 text-amber-700" />
+                        Similar Name Match ({Math.round((result.matchScore || 0) * 100)}% Text Similarity)
+                      </span>
+                    ) : null}
+
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                         getPlatformMeta(result.extraction.sourcePlatform).bg
@@ -299,20 +407,36 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
                     >
                       Source: {getPlatformMeta(result.extraction.sourcePlatform).name}
                     </span>
+
                     {activeCity && (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-800 border border-orange-200">
                         📍 {activeCity}
                       </span>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowEditForm(!showEditForm)}
+                      className="text-[11px] font-bold text-[#FF5E1E] hover:underline ml-1"
+                    >
+                      {showEditForm ? 'Hide Search' : 'Refine Search'}
+                    </button>
                   </div>
-                  <p className="text-xs text-stone-500 mt-0.5">
+
+                  <p className="text-xs text-stone-500 mt-1">
                     {result.extraction.originalPriceRupees ? (
                       <>
                         User-entered price: <strong className="text-stone-800">₹{result.extraction.originalPriceRupees}</strong> ({getPlatformMeta(result.extraction.sourcePlatform).name}) •{' '}
                       </>
                     ) : null}
-                    Data Source: <strong className="text-stone-700 capitalize">{result.extraction.dataSource.replace('_', ' ')}</strong> (Verified against 50+ DEMO catalogue)
+                    Data Source: <strong className="text-stone-700 capitalize">{result.extraction.dataSource.replace('_', ' ')}</strong> • <span className="text-stone-600 font-medium">Curated Demo Catalogue</span>
                   </p>
+
+                  {result.matchType === 'close_equivalent' && (
+                    <p className="text-[11px] text-amber-800 mt-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-block">
+                      Note: This is an alternative dish based on text similarity ({Math.round((result.matchScore || 0) * 100)}% token overlap), not a verified identical product.
+                    </p>
+                  )}
                 </div>
               </div>
 
