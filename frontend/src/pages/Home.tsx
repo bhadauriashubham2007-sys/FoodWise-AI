@@ -8,6 +8,7 @@ import { FoodCard } from '../components/FoodCard';
 import { PriceBreakdownModal } from '../components/PriceBreakdownModal';
 import { CompareByLink } from '../components/CompareByLink';
 import { ExploreByBrand } from '../components/ExploreByBrand';
+import { useSound } from '../context/SoundContext';
 
 interface HomeProps {
   savedItems: FoodItem[];
@@ -15,6 +16,7 @@ interface HomeProps {
 }
 
 export const Home: React.FC<HomeProps> = ({ savedItems, onToggleSave }) => {
+  const { play } = useSound();
   const navigate = useNavigate();
   const { activeCity, setActiveCity } = useUserLocation();
   const [foods, setFoods] = useState<FoodItem[]>([]);
@@ -81,10 +83,12 @@ export const Home: React.FC<HomeProps> = ({ savedItems, onToggleSave }) => {
 
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    play('search_initiate');
     loadFoods(searchQuery, activeCategory);
   };
 
   const handleCategoryClick = (cat: string) => {
+    play('click');
     setActiveCategory(cat);
     // Clear incompatible search text when user browses a new category
     setSearchQuery('');
@@ -93,6 +97,7 @@ export const Home: React.FC<HomeProps> = ({ savedItems, onToggleSave }) => {
   };
 
   const handleClearSearch = () => {
+    play('click');
     setSearchQuery('');
     setSearchedTerm('');
     loadFoods('', activeCategory);
@@ -197,7 +202,12 @@ export const Home: React.FC<HomeProps> = ({ savedItems, onToggleSave }) => {
       </section>
 
       {/* Compare by Link Section */}
-      <CompareByLink onOpenQuickModal={(it) => setModalItem(it)} />
+      <CompareByLink
+        onOpenQuickModal={(it) => {
+          play('modal_open');
+          setModalItem(it);
+        }}
+      />
 
       {/* Explore by Brand Section */}
       <ExploreByBrand />
@@ -384,7 +394,13 @@ export const Home: React.FC<HomeProps> = ({ savedItems, onToggleSave }) => {
       </section>
 
       {/* Quick Modal */}
-      <PriceBreakdownModal item={modalItem} onClose={() => setModalItem(null)} />
+      <PriceBreakdownModal
+        item={modalItem}
+        onClose={() => {
+          play('modal_close');
+          setModalItem(null);
+        }}
+      />
     </div>
   );
 };

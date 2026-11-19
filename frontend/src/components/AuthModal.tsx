@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, LogIn, UserPlus, Lock, Mail, User, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useSound } from '../context/SoundContext';
 
 export const AuthModal: React.FC = () => {
+  const { play } = useSound();
   const {
     authModalOpen,
     authModalMode,
@@ -12,6 +14,11 @@ export const AuthModal: React.FC = () => {
     signUp,
     isConfigured,
   } = useAuth();
+
+  const handleClose = () => {
+    play('modal_close');
+    closeAuthModal();
+  };
 
   const [mode, setMode] = useState<'signin' | 'signup'>(authModalMode);
   const [email, setEmail] = useState('');
@@ -31,12 +38,12 @@ export const AuthModal: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && authModalOpen) {
-        closeAuthModal();
+        handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [authModalOpen, closeAuthModal]);
+  }, [authModalOpen]);
 
   if (!authModalOpen) return null;
 
@@ -48,20 +55,24 @@ export const AuthModal: React.FC = () => {
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
       setErrorMessage('Please enter your email address.');
+      play('action_error');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
       setErrorMessage('Please enter a valid email address.');
+      play('action_error');
       return;
     }
     if (!password || password.length < 6) {
       setErrorMessage('Password must be at least 6 characters.');
+      play('action_error');
       return;
     }
 
     if (mode === 'signup') {
       if (password !== confirmPassword) {
         setErrorMessage('Passwords do not match.');
+        play('action_error');
         return;
       }
     }
@@ -73,17 +84,22 @@ export const AuthModal: React.FC = () => {
         const { error } = await signIn(trimmedEmail, password);
         if (error) {
           setErrorMessage(error.message || 'Failed to sign in. Please verify your credentials.');
+          play('action_error');
         } else {
+          play('action_success');
           closeAuthModal();
         }
       } else {
         const { error, user } = await signUp(trimmedEmail, password, fullName.trim() || undefined);
         if (error) {
           setErrorMessage(error.message || 'Failed to create account.');
+          play('action_error');
         } else if (user) {
           if (user.identities && user.identities.length === 0) {
             setErrorMessage('An account with this email already exists. Please sign in instead.');
+            play('action_error');
           } else {
+            play('action_success');
             setSuccessMessage(
               'Account created! Check your email for confirmation, or you may now sign in.'
             );
@@ -95,6 +111,7 @@ export const AuthModal: React.FC = () => {
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'An unexpected error occurred.');
+      play('action_error');
     } finally {
       setIsSubmitting(false);
     }
@@ -106,7 +123,7 @@ export const AuthModal: React.FC = () => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
-      onClick={closeAuthModal}
+      onClick={handleClose}
     >
       <div
         className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden"
@@ -131,7 +148,7 @@ export const AuthModal: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={closeAuthModal}
+              onClick={handleClose}
               className="p-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white transition-colors"
               aria-label="Close modal"
             >

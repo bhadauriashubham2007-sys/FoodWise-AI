@@ -19,6 +19,7 @@ import { useUserLocation } from '../context/LocationContext';
 import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
 import { PlatformOrderButton } from './PlatformOrderButton';
+import { useSound } from '../context/SoundContext';
 
 interface CompareByLinkProps {
   onOpenQuickModal?: (item: FoodItem) => void;
@@ -31,6 +32,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
   onSaveDeal,
   isSaved,
 }) => {
+  const { play } = useSound();
   const { activeCity } = useUserLocation();
   const [url, setUrl] = useState('');
   const [manualFoodName, setManualFoodName] = useState('');
@@ -67,6 +69,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
       setLoading(true);
       setError(null);
       setLoadingStep(1);
+      play('search_initiate');
 
       const t1 = setTimeout(() => setLoadingStep(2), 400);
       const t2 = setTimeout(() => setLoadingStep(3), 900);
@@ -85,10 +88,14 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
 
       if (!res.success && res.message) {
         setError(res.message);
+        play('action_error');
+      } else if (res.success) {
+        play('comparison_complete');
       }
     } catch (err: any) {
       console.error('Compare by link error:', err);
       setError(err?.message || 'Unable to analyze link. Please check the URL and try again.');
+      play('action_error');
     } finally {
       setLoading(false);
       setLoadingStep(0);
@@ -96,6 +103,7 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
   };
 
   const handleClear = () => {
+    play('click');
     setUrl('');
     setManualFoodName('');
     setManualPrice('');
@@ -647,7 +655,10 @@ export const CompareByLink: React.FC<CompareByLinkProps> = ({
               {onOpenQuickModal && (
                 <button
                   type="button"
-                  onClick={() => onOpenQuickModal(result.matchedFoodItem!)}
+                  onClick={() => {
+                    play('modal_open');
+                    onOpenQuickModal(result.matchedFoodItem!);
+                  }}
                   className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 text-xs font-bold transition-colors"
                 >
                   Full Fee Audit Matrix

@@ -7,6 +7,7 @@ import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
 import { useUserLocation } from '../context/LocationContext';
 import { PlatformOrderButton } from '../components/PlatformOrderButton';
+import { useSound } from '../context/SoundContext';
 
 interface ComparisonProps {
   savedItems: FoodItem[];
@@ -14,6 +15,7 @@ interface ComparisonProps {
 }
 
 export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave }) => {
+  const { play } = useSound();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedItemId = searchParams.get('item');
 
@@ -98,12 +100,14 @@ export const Comparison: React.FC<ComparisonProps> = ({ savedItems, onToggleSave
   };
 
   const handleSelectItem = (item: FoodItem) => {
+    play('click');
     setSelectedItem(item);
     setSearchParams({ item: item.id });
     loadComparison(item.id, coupons);
   };
 
   const handleApplyCoupon = (platform: PlatformType, code: string) => {
+    play('action_success');
     const updated = { ...coupons, [platform]: code };
     setCoupons(updated);
     if (selectedItem) {

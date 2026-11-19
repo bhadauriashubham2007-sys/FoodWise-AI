@@ -4,6 +4,7 @@ import { FoodItem, PlatformPriceQuote } from '../types';
 import { formatPaise, formatFeeDisplay } from '../utils/currency';
 import { logPlatformRedirect } from '../utils/telemetry';
 import { PlatformOrderButton } from './PlatformOrderButton';
+import { useSound } from '../context/SoundContext';
 
 interface PriceBreakdownModalProps {
   item: FoodItem | null;
@@ -11,7 +12,13 @@ interface PriceBreakdownModalProps {
 }
 
 export const PriceBreakdownModal: React.FC<PriceBreakdownModalProps> = ({ item, onClose }) => {
+  const { play } = useSound();
   if (!item) return null;
+
+  const handleClose = () => {
+    play('modal_close');
+    onClose();
+  };
 
   const sortedQuotes = [...item.quotes].sort((a, b) => a.finalPricePaise - b.finalPricePaise);
   const cheapestPlatform = sortedQuotes[0]?.platform;
@@ -37,7 +44,7 @@ export const PriceBreakdownModal: React.FC<PriceBreakdownModalProps> = ({ item, 
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors"
           >
             <X className="w-5 h-5" />

@@ -17,6 +17,7 @@ import { queryAI } from '../services/api';
 import { useUserLocation } from '../context/LocationContext';
 import { FoodCard } from '../components/FoodCard';
 import { PriceBreakdownModal } from '../components/PriceBreakdownModal';
+import { useSound } from '../context/SoundContext';
 
 interface SearchProps {
   savedItems: FoodItem[];
@@ -35,6 +36,7 @@ interface FilterOverrides {
 }
 
 export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
+  const { play } = useSound();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const { activeCity, setActiveCity } = useUserLocation();
@@ -212,6 +214,7 @@ export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
   };
 
   const handleClearAll = () => {
+    play('click');
     setPrompt('');
     setDietary('all');
     setBudgetRupees(undefined);
@@ -275,13 +278,17 @@ export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
+                  play('search_initiate');
                   executeSearch();
                 }
               }}
               className="w-full bg-transparent p-2 text-stone-900 placeholder-stone-400 text-sm focus:outline-none resize-none font-medium"
             />
             <button
-              onClick={() => executeSearch()}
+              onClick={() => {
+                play('search_initiate');
+                executeSearch();
+              }}
               disabled={loading}
               className="self-end px-5 py-3 rounded-xl bg-[#FF5E1E] hover:bg-[#E54E12] disabled:opacity-50 text-white font-bold text-sm shadow-md transition-all flex items-center gap-2 flex-shrink-0"
             >
@@ -427,6 +434,7 @@ export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
                 key={q}
                 type="button"
                 onClick={() => {
+                  play('search_initiate');
                   setPrompt(q);
                   executeSearch({ prompt: q });
                 }}
@@ -605,7 +613,10 @@ export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
                   item={item}
                   isSaved={savedItems.some((s) => s.id === item.id)}
                   onToggleSave={onToggleSave}
-                  onOpenQuickModal={(it) => setModalItem(it)}
+                  onOpenQuickModal={(it) => {
+                    play('modal_open');
+                    setModalItem(it);
+                  }}
                 />
               ))}
             </div>
@@ -614,7 +625,13 @@ export const Search: React.FC<SearchProps> = ({ savedItems, onToggleSave }) => {
       )}
 
       {/* Quick Modal */}
-      <PriceBreakdownModal item={modalItem} onClose={() => setModalItem(null)} />
+      <PriceBreakdownModal
+        item={modalItem}
+        onClose={() => {
+          play('modal_close');
+          setModalItem(null);
+        }}
+      />
     </div>
   );
 };

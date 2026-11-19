@@ -7,6 +7,7 @@ import { AuthModal } from './components/AuthModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LocationProvider } from './context/LocationContext';
+import { SoundProvider, useSound } from './context/SoundContext';
 import { Home } from './pages/Home';
 import { Search } from './pages/Search';
 import { Comparison } from './pages/Comparison';
@@ -23,6 +24,7 @@ import {
 
 const AppContent: React.FC = () => {
   const { user, token } = useAuth();
+  const { play } = useSound();
   const [savedItems, setSavedItems] = useState<FoodItem[]>(() => {
     try {
       const stored = localStorage.getItem('foodwise_saved_deals');
@@ -207,10 +209,12 @@ const AppContent: React.FC = () => {
 
     if (existingIndex >= 0) {
       // Deal already saved: remove it
+      play('favorite_remove');
       const existingItem = savedItems[existingIndex];
       await handleRemoveSave(existingItem);
     } else {
       // Add deal
+      play('deal_saved');
       if (user && token) {
         try {
           const cheapest = item.cheapestPlatform || item.quotes[0]?.platform || 'zomato';
@@ -245,6 +249,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleRemoveSave = async (item: FoodItem) => {
+    play('favorite_remove');
     if (user && token && item.savedDealId) {
       try {
         await deleteSavedDeal(user.id, item.savedDealId, token);
@@ -272,6 +277,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleClearAll = async () => {
+    play('action_success');
     if (user && token) {
       for (const item of savedItems) {
         if (item.savedDealId) {
@@ -343,7 +349,9 @@ export const App: React.FC = () => {
       <BrowserRouter>
         <AuthProvider>
           <LocationProvider>
-            <AppContent />
+            <SoundProvider>
+              <AppContent />
+            </SoundProvider>
           </LocationProvider>
         </AuthProvider>
       </BrowserRouter>

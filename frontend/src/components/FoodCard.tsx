@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Star, MapPin, Bookmark, ArrowRight, Zap } from 'lucide-react';
 import { FoodItem } from '../types';
 import { formatPaise } from '../utils/currency';
+import { useSound } from '../context/SoundContext';
 
 interface FoodCardProps {
   item: FoodItem;
@@ -17,6 +18,7 @@ export const FoodCard: React.FC<FoodCardProps> = ({
   onToggleSave,
   onOpenQuickModal,
 }) => {
+  const { play } = useSound();
   // Sort quotes to find cheapest
   const quotes = [...item.quotes].sort((a, b) => a.finalPricePaise - b.finalPricePaise);
   const cheapest = quotes[0];
@@ -199,7 +201,10 @@ export const FoodCard: React.FC<FoodCardProps> = ({
 
             {onOpenQuickModal && (
               <button
-                onClick={() => onOpenQuickModal(item)}
+                onClick={() => {
+                  play('modal_open');
+                  onOpenQuickModal(item);
+                }}
                 className="py-2.5 px-3 rounded-xl border border-stone-300 hover:bg-stone-100 text-stone-700 text-xs font-semibold transition-colors"
                 title="Quick Fee Inspector"
               >

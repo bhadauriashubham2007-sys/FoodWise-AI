@@ -15,9 +15,12 @@ import {
   MapPin,
   ChevronDown,
   Check,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUserLocation } from '../context/LocationContext';
+import { useSound } from '../context/SoundContext';
 
 interface NavbarProps {
   savedCount: number;
@@ -28,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({ savedCount }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { user, profile, signOut, openAuthModal } = useAuth();
   const { activeCity, setActiveCity } = useUserLocation();
+  const { soundEnabled, setSoundEnabled, testSound } = useSound();
   const [locationDropdownOpen, setLocationDropdownOpen] = useState(false);
   const [customCityInput, setCustomCityInput] = useState('');
   const locationMenuRef = useRef<HTMLDivElement>(null);
@@ -245,6 +249,25 @@ export const Navbar: React.FC<NavbarProps> = ({ savedCount }) => {
               </button>
             )}
 
+            {/* Quick Audio Feedback Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                if (next) testSound('action_success');
+              }}
+              className={`p-2 rounded-xl border transition-all text-xs font-bold flex items-center justify-center ${
+                soundEnabled
+                  ? 'bg-orange-50 border-orange-200 text-[#FF5E1E] hover:bg-orange-100 shadow-sm'
+                  : 'bg-white border-stone-200 text-stone-500 hover:text-stone-800 hover:border-stone-300 shadow-sm'
+              }`}
+              title={soundEnabled ? 'UI Sound Effects: Enabled (Click to mute)' : 'UI Sound Effects: Disabled (Click to enable)'}
+              aria-label={soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+            >
+              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+            </button>
+
             <Link
               to="/ai-search"
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#FF5E1E] hover:bg-[#E54E12] text-white text-sm font-bold shadow-md shadow-orange-500/20 hover:shadow-orange-500/30 transition-all duration-200 hover:-translate-y-0.5"
@@ -324,6 +347,36 @@ export const Navbar: React.FC<NavbarProps> = ({ savedCount }) => {
               </Link>
             );
           })}
+
+          {/* Mobile Sound Settings Toggle */}
+          <div className="flex items-center justify-between px-4 py-3 bg-white rounded-xl border border-stone-200">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center text-[#FF5E1E]">
+                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-stone-400" />}
+              </div>
+              <div>
+                <div className="text-xs font-bold text-stone-900">Sound Effects</div>
+                <div className="text-[10px] text-stone-500">
+                  {soundEnabled ? 'Enabled (Web Audio API)' : 'Muted by default (Opt-in)'}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                if (next) testSound('action_success');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                soundEnabled
+                  ? 'bg-[#FF5E1E] text-white shadow-sm'
+                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+              }`}
+            >
+              {soundEnabled ? 'Mute' : 'Enable'}
+            </button>
+          </div>
 
           {/* Mobile Auth Button */}
           <div className="pt-2 border-t border-stone-200">

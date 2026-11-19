@@ -11,9 +11,14 @@ import {
   Lock,
   LogIn,
   AlertCircle,
+  Volume2,
+  VolumeX,
+  Volume1,
+  Play,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useUserLocation } from '../context/LocationContext';
+import { useSound } from '../context/SoundContext';
 
 const DEFAULT_PREFERENCES = {
   name: 'Foodie Friend',
@@ -26,6 +31,7 @@ const DEFAULT_PREFERENCES = {
 export const Profile: React.FC = () => {
   const { user, profile, token, openAuthModal, isConfigured, updateProfile, loading } = useAuth();
   const { activeCity, setActiveCity } = useUserLocation();
+  const { soundEnabled, setSoundEnabled, volume, setVolume, testSound, play } = useSound();
 
   const [name, setName] = useState(DEFAULT_PREFERENCES.name);
   const [dietaryPreference, setDietaryPreference] = useState<'all' | 'veg' | 'non-veg' | 'egg' | 'vegan'>(
@@ -123,11 +129,13 @@ export const Profile: React.FC = () => {
         setSavedSuccess('Preferences saved locally in your browser (Guest Mode).');
       }
 
+      play('action_success');
       setTimeout(() => setSavedSuccess(null), 4000);
     } catch (err: any) {
       console.error('[Profile] Save failed:', err);
       setErrorMessage(err.message || 'Failed to save profile preferences.');
       setSavedSuccess(null);
+      play('action_error');
     } finally {
       setIsSaving(false);
     }
@@ -233,8 +241,8 @@ export const Profile: React.FC = () => {
           )}
         </div>
 
-        {/* Preferences Form */}
-        <div className="md:col-span-2">
+        {/* Preferences Form & Sound Settings */}
+        <div className="md:col-span-2 space-y-8">
           <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200 shadow-card">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
@@ -375,6 +383,144 @@ export const Profile: React.FC = () => {
                 </div>
               )}
             </form>
+          </div>
+
+          {/* Sound & Audio Feedback Settings Card */}
+          <div className="bg-white rounded-3xl p-6 sm:p-8 border border-stone-200 shadow-card">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-orange-100 flex items-center justify-center text-[#FF5E1E] shadow-sm">
+                  {soundEnabled ? (
+                    volume > 0.5 ? <Volume2 className="w-5 h-5" /> : <Volume1 className="w-5 h-5" />
+                  ) : (
+                    <VolumeX className="w-5 h-5 text-stone-400" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-stone-900 flex items-center gap-2">
+                    <span>Sound Effects &amp; Audio Feedback</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200">
+                      Web Audio API
+                    </span>
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    Subtle, polished SaaS confirmations for button clicks, saved deals, and comparison completions.
+                  </p>
+                </div>
+              </div>
+
+              {/* Master Sound Toggle */}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={soundEnabled}
+                aria-label="Toggle UI sound effects"
+                onClick={() => {
+                  const nextState = !soundEnabled;
+                  setSoundEnabled(nextState);
+                  if (nextState) {
+                    testSound('action_success');
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#FF5E1E] focus:ring-offset-2 ${
+                  soundEnabled ? 'bg-[#FF5E1E]' : 'bg-stone-300'
+                }`}
+              >
+                <span className="sr-only">Enable sound effects</span>
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-stone-100 space-y-5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-stone-700">Audio Status</span>
+                <span
+                  className={`font-bold px-2.5 py-1 rounded-full text-[11px] ${
+                    soundEnabled
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-stone-100 text-stone-600 border border-stone-200'
+                  }`}
+                >
+                  {soundEnabled ? 'Enabled' : 'Muted by Default (Opt-in)'}
+                </span>
+              </div>
+
+              {/* Volume Slider */}
+              <div>
+                <div className="flex items-center justify-between text-xs font-semibold text-stone-700 mb-2">
+                  <span className="flex items-center gap-1.5">
+                    <span>Feedback Volume</span>
+                    <span className="text-stone-400 font-normal">({Math.round(volume * 100)}%)</span>
+                  </span>
+                  <span className="text-[11px] text-stone-500 font-normal">
+                    {volume === 0 ? 'Muted' : volume < 0.4 ? 'Soft' : volume < 0.8 ? 'Balanced' : 'Full'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <VolumeX
+                    className={`w-4 h-4 ${volume === 0 ? 'text-[#FF5E1E]' : 'text-stone-400'}`}
+                  />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={volume}
+                    disabled={!soundEnabled}
+                    onChange={(e) => {
+                      const newVol = parseFloat(e.target.value);
+                      setVolume(newVol);
+                    }}
+                    onMouseUp={() => {
+                      if (soundEnabled) testSound('click');
+                    }}
+                    onTouchEnd={() => {
+                      if (soundEnabled) testSound('click');
+                    }}
+                    className="flex-1 h-2 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-[#FF5E1E] disabled:opacity-40 disabled:cursor-not-allowed"
+                    aria-label="Sound effects volume"
+                  />
+                  <Volume2
+                    className={`w-4 h-4 ${volume > 0.6 ? 'text-[#FF5E1E]' : 'text-stone-400'}`}
+                  />
+                </div>
+              </div>
+
+              {/* Sound Test / Preview Buttons */}
+              <div>
+                <label className="block text-[11px] font-bold text-stone-500 uppercase tracking-wider mb-2">
+                  Preview Sound Profiles
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { label: 'Tactile Click', type: 'click' as const },
+                    { label: 'Save Deal', type: 'deal_saved' as const },
+                    { label: 'Comparison', type: 'comparison_complete' as const },
+                    { label: 'Confirmation', type: 'action_success' as const },
+                  ].map((sample) => (
+                    <button
+                      key={sample.type}
+                      type="button"
+                      onClick={() => testSound(sample.type)}
+                      className="px-3 py-2 rounded-xl bg-stone-50 hover:bg-orange-50 hover:border-orange-200 hover:text-[#FF5E1E] border border-stone-200 text-xs font-semibold text-stone-700 transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>{sample.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Note */}
+              <p className="text-[11px] text-stone-500 leading-relaxed bg-stone-50 p-3 rounded-xl border border-stone-200">
+                Sounds are synthesized directly in your browser using the standard Web Audio API without downloading audio files or tracking audio activity. In accordance with web standards, audio output is initialized only after your first click.
+              </p>
+            </div>
           </div>
         </div>
       </div>
